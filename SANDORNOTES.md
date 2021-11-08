@@ -17,3 +17,11 @@ A^(b) = sofmax(Q^(b)*K^(b)/sqrt(d_h)) is the attention in each block of transfor
 
 Operation: max(0, v) is denoted as v⁺
 
+## Architechture relevant for classification fine tuning
+
+![arch](sandor_note_imgs/BERT_NSP_TASK_Architechture_used_for_classification_fine_tuning.png)
+
+## Relevance for layer zero (R⁽⁰⁾)
+
+![R0](sandor_note_imgs/relevance_for_layer_zero.png)
+
