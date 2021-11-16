@@ -1,8 +1,11 @@
 import torch
-from torch import nn
+from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
+from transformers.models.bert.configuration_bert import BertConfig
 from transformers.models.bert.modeling_bert import BertPooler, BertPreTrainedModel
-from transformers.modeling_outputs import BaseModelOutputWithPoolingAndCrossAttentions, BaseModelOutputWithPastAndCrossAttentions
+from transformers.modeling_outputs import BaseModelOutputWithPoolingAndCrossAttentions, BaseModelOutputWithPastAndCrossAttentions, SequenceClassifierOutput
 from transformers.activations import ACT2FN 
+
+from ..custom_layer import *
 
 from packaging import version
 import math
@@ -14,7 +17,7 @@ from transformers.modeling_utils import (
 )
 
 # Base model of BERT gotten from huggingfaces: https://github.com/huggingface/transformers/blob/master/src/transformers/models/bert/modeling_bert.py
-class CustomBertModel(BertPreTrainedModel):
+class BertModel(BertPreTrainedModel):
     """
     The model can behave as an encoder (with only self-attention) as well as a decoder, in which case a layer of
     cross-attention is added between the self-attention layers, following the architecture described in `Attention is
@@ -177,45 +180,23 @@ class CustomBertModel(BertPreTrainedModel):
             attentions=encoder_outputs.attentions,
             cross_attentions=encoder_outputs.cross_attentions,
         )
-
-class BertModelExplainable(CustomBertModel):
-    def __init__(self, config, add_pooling_layer=False):
-        config.output_attentions = True
-        super().__init__(config, add_pooling_layer=add_pooling_layer)
     
-    def get_relevance_map(self,
-        input_ids=None,
-        attention_mask=None,
-        token_type_ids=None,
-        position_ids=None,
-        head_mask=None,
-        inputs_embeds=None,
-        encoder_hidden_states=None,
-        encoder_attention_mask=None,
-        past_key_values=None,
-        use_cache=None,
-        output_attentions=None,
-        output_hidden_states=None,
-        return_dict=None):
-
-        outputs = self(input.requires_grad())
-        attentions = outputs.attentions
-        
-        # average over second dimension (number of heads)
+    def relevance_propagation(self, R):
+        pass
 
 class BertEmbeddings(torch.nn.Module):
     """Construct the embeddings from word, position and token_type embeddings."""
 
     def __init__(self, config):
         super().__init__()
-        self.word_embeddings = nn.Embedding(config.vocab_size, config.hidden_size, padding_idx=config.pad_token_id)
-        self.position_embeddings = nn.Embedding(config.max_position_embeddings, config.hidden_size)
-        self.token_type_embeddings = nn.Embedding(config.type_vocab_size, config.hidden_size)
+        self.word_embeddings = Embedding(config.vocab_size, config.hidden_size, padding_idx=config.pad_token_id)
+        self.position_embeddings = Embedding(config.max_position_embeddings, config.hidden_size)
+        self.token_type_embeddings = Embedding(config.type_vocab_size, config.hidden_size)
 
         # self.LayerNorm is not snake-cased to stick with TensorFlow model variable name and be able to load
         # any TensorFlow checkpoint file
-        self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
-        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.LayerNorm = LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.dropout = Dropout(config.hidden_dropout_prob)
         # position_ids (1, len position emb) is contiguous in memory and exported when serialized
         self.position_embedding_type = getattr(config, "position_embedding_type", "absolute")
         self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))
@@ -261,6 +242,9 @@ class BertEmbeddings(torch.nn.Module):
         embeddings = self.LayerNorm(embeddings)
         embeddings = self.dropout(embeddings)
         return embeddings
+    
+    def relevance_propagation(self, R):
+        pass
 
 class BertEncoder(torch.nn.Module):
     def __init__(self, config):
@@ -357,6 +341,9 @@ class BertEncoder(torch.nn.Module):
             attentions=all_self_attentions,
             cross_attentions=all_cross_attentions,
         )
+    
+    def relevance_propagation(self, R):
+        pass
 
 class BertAttention(torch.nn.Module):
     def __init__(self, config):
@@ -405,6 +392,9 @@ class BertAttention(torch.nn.Module):
         attention_output = self.output(self_outputs[0], hidden_states)
         outputs = (attention_output,) + self_outputs[1:]  # add attentions if we output them
         return outputs
+    
+    def relevance_propagation(self, R):
+        pass
 
 class BertSelfAttention(torch.nn.Module):
     def __init__(self, config):
@@ -419,21 +409,17 @@ class BertSelfAttention(torch.nn.Module):
         self.attention_head_size = int(config.hidden_size / config.num_attention_heads)
         self.all_head_size = self.num_attention_heads * self.attention_head_size
 
-        self.query = nn.Linear(config.hidden_size, self.all_head_size)
-        self.key = nn.Linear(config.hidden_size, self.all_head_size)
-        self.value = nn.Linear(config.hidden_size, self.all_head_size)
+        self.query = Linear(config.hidden_size, self.all_head_size)
+        self.key = Linear(config.hidden_size, self.all_head_size)
+        self.value = Linear(config.hidden_size, self.all_head_size)
 
-        self.dropout = nn.Dropout(config.attention_probs_dropout_prob)
+        self.dropout = Dropout(config.attention_probs_dropout_prob)
         self.position_embedding_type = getattr(config, "position_embedding_type", "absolute")
         if self.position_embedding_type == "relative_key" or self.position_embedding_type == "relative_key_query":
             self.max_position_embeddings = config.max_position_embeddings
             self.distance_embedding = nn.Embedding(2 * config.max_position_embeddings - 1, self.attention_head_size)
 
         self.is_decoder = config.is_decoder
-
-        # Custom
-        self.attention_probs = None
-        self.forward_input = None
 
     def transpose_for_scores(self, x):
         new_x_shape = x.size()[:-1] + (self.num_attention_heads, self.attention_head_size)
@@ -450,7 +436,6 @@ class BertSelfAttention(torch.nn.Module):
         past_key_value=None,
         output_attentions=False,
     ):
-        self.forward_input = hidden_states
         mixed_query_layer = self.query(hidden_states)
 
         # If this is instantiated as a cross-attention module, the keys
@@ -513,11 +498,8 @@ class BertSelfAttention(torch.nn.Module):
             attention_scores = attention_scores + attention_mask
 
         # Normalize the attention scores to probabilities.
-        # SANDORNOTE: We want to hook here so that we can calculate R^(n_b)
-        # "where n_b is the layer that corresponds to the softmax operation"
+        # SANDORNOTE: This is the what we want to get the relevance of
         attention_probs = nn.Softmax(dim=-1)(attention_scores)
-
-        self.attention_probs = attention_probs
 
         # This is actually dropping out entire tokens to attend to, which might
         # seem a bit unusual, but is taken from the original Transformer paper.
@@ -527,8 +509,6 @@ class BertSelfAttention(torch.nn.Module):
         if head_mask is not None:
             attention_probs = attention_probs * head_mask
 
-        # SANDORNOTE: here we get that big O (attention times value matrix)
-        # Be careful not to compute the relevance for this!
         context_layer = torch.matmul(attention_probs, value_layer)
 
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
@@ -540,37 +520,44 @@ class BertSelfAttention(torch.nn.Module):
         if self.is_decoder:
             outputs = outputs + (past_key_value,)
         return outputs
+    
+    def relevance_propagation(self, R):
+        pass
 
 class BertSelfOutput(torch.nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.dense = nn.Linear(config.hidden_size, config.hidden_size)
-        self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
-        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.dense = Linear(config.hidden_size, config.hidden_size)
+        self.LayerNorm = LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.dropout = Dropout(config.hidden_dropout_prob)
 
     def forward(self, hidden_states, input_tensor):
         hidden_states = self.dense(hidden_states)
         hidden_states = self.dropout(hidden_states)
         hidden_states = self.LayerNorm(hidden_states + input_tensor)
         return hidden_states
+    def relevance_propagation(self, R):
+        pass
 
 class BertOutput(torch.nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.dense = nn.Linear(config.intermediate_size, config.hidden_size)
-        self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
-        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.dense = Linear(config.intermediate_size, config.hidden_size)
+        self.LayerNorm = LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.dropout = Dropout(config.hidden_dropout_prob)
 
     def forward(self, hidden_states, input_tensor):
         hidden_states = self.dense(hidden_states)
         hidden_states = self.dropout(hidden_states)
         hidden_states = self.LayerNorm(hidden_states + input_tensor)
         return hidden_states
+    def relevance_propagation(self, R):
+        pass
 
 class BertIntermediate(torch.nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.dense = nn.Linear(config.hidden_size, config.intermediate_size)
+        self.dense = Linear(config.hidden_size, config.intermediate_size)
         if isinstance(config.hidden_act, str):
             self.intermediate_act_fn = ACT2FN[config.hidden_act]
         else:
@@ -580,6 +567,9 @@ class BertIntermediate(torch.nn.Module):
         hidden_states = self.dense(hidden_states)
         hidden_states = self.intermediate_act_fn(hidden_states)
         return hidden_states
+
+    def relevance_propagation(self, R):
+        pass
 
 class BertLayer(torch.nn.Module):
     def __init__(self, config):
@@ -659,12 +649,120 @@ class BertLayer(torch.nn.Module):
             outputs = outputs + (present_key_value,)
 
         return outputs
+    
+    def relevance_propagation(self, R):
+        pass
 
     def feed_forward_chunk(self, attention_output):
         intermediate_output = self.intermediate(attention_output)
         layer_output = self.output(intermediate_output, attention_output)
         return layer_output
 
+class BertForSequenceClassification(BertPreTrainedModel):
+    def __init__(self, config):
+        super().__init__(config)
+        self.num_labels = config.num_labels
+        self.config = config
+
+        self.bert = BertModel(config)
+        classifier_dropout = (
+            config.classifier_dropout if config.classifier_dropout is not None else config.hidden_dropout_prob
+        )
+        self.dropout = Dropout(classifier_dropout)
+        self.classifier = Linear(config.hidden_size, config.num_labels)
+
+        self.init_weights()
+
+    def forward(
+        self,
+        input_ids=None,
+        attention_mask=None,
+        token_type_ids=None,
+        position_ids=None,
+        head_mask=None,
+        inputs_embeds=None,
+        labels=None,
+        output_attentions=None,
+        output_hidden_states=None,
+        return_dict=None
+    ):
+        r"""
+        labels (:obj:`torch.LongTensor` of shape :obj:`(batch_size,)`, `optional`):
+            Labels for computing the sequence classification/regression loss. Indices should be in :obj:`[0, ...,
+            config.num_labels - 1]`. If :obj:`config.num_labels == 1` a regression loss is computed (Mean-Square loss),
+            If :obj:`config.num_labels > 1` a classification loss is computed (Cross-Entropy).
+        """
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+
+        outputs = self.bert(
+            input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            position_ids=position_ids,
+            head_mask=head_mask,
+            inputs_embeds=inputs_embeds,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+
+        pooled_output = outputs[1]
+
+        pooled_output = self.dropout(pooled_output)
+        logits = self.classifier(pooled_output)
+
+        loss = None
+        if labels is not None:
+            if self.config.problem_type is None:
+                if self.num_labels == 1:
+                    self.config.problem_type = "regression"
+                elif self.num_labels > 1 and (labels.dtype == torch.long or labels.dtype == torch.int):
+                    self.config.problem_type = "single_label_classification"
+                else:
+                    self.config.problem_type = "multi_label_classification"
+
+            if self.config.problem_type == "regression":
+                loss_fct = MSELoss()
+                if self.num_labels == 1:
+                    loss = loss_fct(logits.squeeze(), labels.squeeze())
+                else:
+                    loss = loss_fct(logits, labels)
+            elif self.config.problem_type == "single_label_classification":
+                loss_fct = CrossEntropyLoss()
+                loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+            elif self.config.problem_type == "multi_label_classification":
+                loss_fct = BCEWithLogitsLoss()
+                loss = loss_fct(logits, labels)
+        if not return_dict:
+            output = (logits,) + outputs[2:]
+            return ((loss,) + output) if loss is not None else output
+
+        return SequenceClassifierOutput(
+            loss=loss,
+            logits=logits,
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
+        )
+    def relevance_propagation(self, R):
+        pass
 
 
+if __name__ == "__main__":
+
+    huggingface_model_name = "bert-base-uncased"
+    # from transformers import AutoConfig
+
+    # non_pretrained_model = BertForSequenceClassification(AutoConfig.from_pretrained(huggingface_model_name))
+
+    from transformers import AutoTokenizer
+    tokenizer = AutoTokenizer.from_pretrained(huggingface_model_name)
+
+    inputs = tokenizer("This movie was great!", padding="max_length", truncation=True)
+
+    model = BertForSequenceClassification.from_pretrained(huggingface_model_name, num_labels=2)
+    outputs = model(torch.Tensor(inputs["input_ids"]).int().unsqueeze(0))
+
+    model.relevance_propagation()
+
+    print("Done!")
 
