@@ -1043,8 +1043,7 @@ def main():
 
     model = vit_base_patch16_224().to(device)
     model.eval()
-
-    image = Image.open(input("Insert Path: "))
+    image = Image.open('samples/catdog.png')
     dog_cat_image = transform(image)
 
     fig, axs = plt.subplots(1, 3)
@@ -1052,7 +1051,6 @@ def main():
     axs[0].axis('off')
 
     output = model(dog_cat_image.unsqueeze(0).to(device))
-    pdb.set_trace()
     print_top_classes(output)
 
 
