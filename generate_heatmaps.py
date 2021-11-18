@@ -1081,8 +1081,7 @@ def main():
     model = vit_base_patch16_224().to(device)
     model.eval()
     attribution_generator = LRP(model)
-
-    image = Image.open(input("Insert Path: "))
+    image = Image.open('samples/catdog.png')
     dog_cat_image = transform(image)
 
     fig, axs = plt.subplots(1, 3)
