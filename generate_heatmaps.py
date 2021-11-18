@@ -1,4 +1,5 @@
-from baseline.models.ViT_base import vit_base_patch16_224
+from baseline.models.ViT_paper import vit_base_patch16_224
+from baseline.models.ViT_ours import vit_base_patch16_224 as our_vit_base_patch16_224
 from PIL import Image
 import torchvision.transforms as transforms
 import matplotlib.pyplot as plt
@@ -7,6 +8,9 @@ import numpy as np
 import cv2
 import pdb
 from baseline.models.ViT_explanation_generator import LRP
+import h5py
+import os
+
 
 CLS2IDX = {0: 'tench, Tinca tinca',
            1: 'goldfish, Carassius auratus',
@@ -1065,6 +1069,67 @@ def generate_visualization(original_image, attribution_generator, class_index=No
     return vis
 
 
+def compute_saliency_and_save(images, path, lrp, device):
+    first = True
+    with h5py.File(os.path.join(path, 'results.hdf5'), 'a') as f:
+        data_cam = f.create_dataset('vis',
+                                    (1, 1, 224, 224),
+                                    maxshape=(None, 1, 224, 224),
+                                    dtype=np.float32,
+                                    compression="gzip")
+        data_image = f.create_dataset('image',
+                                      (1, 3, 224, 224),
+                                      maxshape=(None, 3, 224, 224),
+                                      dtype=np.float32,
+                                      compression="gzip")
+        data_target = f.create_dataset('target',
+                                       (1,),
+                                       maxshape=(None,),
+                                       dtype=np.int32,
+                                       compression="gzip")
+        for batch_idx, (data, target) in enumerate(images):
+            if first:
+                first = False
+                data_cam.resize(data_cam.shape[0] + data.shape[0] - 1, axis=0)
+                data_image.resize(data_image.shape[0] + data.shape[0] - 1, axis=0)
+                data_target.resize(data_target.shape[0] + data.shape[0] - 1, axis=0)
+            else:
+                data_cam.resize(data_cam.shape[0] + data.shape[0], axis=0)
+                data_image.resize(data_image.shape[0] + data.shape[0], axis=0)
+                data_target.resize(data_target.shape[0] + data.shape[0], axis=0)
+
+            # Add data
+            data_image[-data.shape[0]:] = data.data.cpu().numpy()
+            data_target[-data.shape[0]:] = target.data.cpu().numpy()
+
+            target = target.to(device)
+
+            # data = normalize(data)
+            data = data.to(device)
+            data.requires_grad_()
+
+            index = None
+
+            Res = lrp.generate_LRP(
+                data, start_layer=1, index=index, device=device
+            ).reshape(data.shape[0], 1, 14, 14,)
+
+            Res = torch.nn.functional.interpolate(Res, scale_factor=16, mode='bilinear').to(device)
+
+            Res = (Res - Res.min()) / (Res.max() - Res.min())
+
+            data_cam[-data.shape[0]:] = Res.data.cpu().numpy()
+
+
+def normalize(tensor,
+              mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]):
+    dtype = tensor.dtype
+    mean = torch.as_tensor(mean, dtype=dtype, device=tensor.device)
+    std = torch.as_tensor(std, dtype=dtype, device=tensor.device)
+    tensor.sub_(mean[None, :, None, None]).div_(std[None, :, None, None])
+    return tensor
+
+
 def main():
     normalize = transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
     transform = transforms.Compose([
@@ -1078,7 +1143,8 @@ def main():
     cuda = torch.cuda.is_available()
     device = torch.device("cuda" if cuda else "cpu")
 
-    model = vit_base_patch16_224().to(device)
+    # model = vit_base_patch16_224().to(device)
+    model = our_vit_base_patch16_224().to(device)
     model.eval()
     attribution_generator = LRP(model)
     image = Image.open('samples/catdog.png')
@@ -1092,20 +1158,34 @@ def main():
     # pdb.set_trace()
     print_top_classes(output)
 
-    # cat - the predicted class
-    cat = generate_visualization(
-        dog_cat_image, attribution_generator=attribution_generator, device=device)
+    visualize = False
 
-    # dog
-    # generate visualization for class 243: 'bull mastiff'
-    dog = generate_visualization(
-        dog_cat_image, attribution_generator=attribution_generator, class_index=243, device=device)
+    if visualize:
+        # cat - the predicted class
+        cat = generate_visualization(
+            dog_cat_image, attribution_generator=attribution_generator, device=device)
 
-    axs[1].imshow(cat)
-    axs[1].axis('off')
-    axs[2].imshow(dog)
-    axs[2].axis('off')
-    plt.show()
+        # dog
+        # generate visualization for class 243: 'bull mastiff'
+        dog = generate_visualization(
+            dog_cat_image, attribution_generator=attribution_generator, class_index=243,
+            device=device)
+
+        axs[1].imshow(cat)
+        axs[1].axis('off')
+        axs[2].imshow(dog)
+        axs[2].axis('off')
+        plt.show()
+    else:
+        images = []
+        image = Image.open('samples/dogbird.png')
+        dog_bird_image = transform(image)
+
+        images.append((dog_cat_image.unsqueeze(0), torch.tensor(282)))
+        # images.append((dog_cat_image, 243))
+        images.append((dog_bird_image.unsqueeze(0), torch.tensor(161)))
+        # images.append((dog_bird_image, 87))
+        compute_saliency_and_save(images, "results", attribution_generator, device)
 
 
 if __name__ == "__main__":
