@@ -5,7 +5,7 @@ from transformers.models.bert.modeling_bert import BertPooler, BertPreTrainedMod
 from transformers.modeling_outputs import BaseModelOutputWithPoolingAndCrossAttentions, BaseModelOutputWithPastAndCrossAttentions, SequenceClassifierOutput
 from transformers.activations import ACT2FN 
 
-from ..custom_layer import *
+from custom_layer import *
 
 from packaging import version
 import math
@@ -499,7 +499,7 @@ class BertSelfAttention(torch.nn.Module):
 
         # Normalize the attention scores to probabilities.
         # SANDORNOTE: This is the what we want to get the relevance of
-        attention_probs = nn.Softmax(dim=-1)(attention_scores)
+        attention_probs = Softmax(dim=-1)(attention_scores)
 
         # This is actually dropping out entire tokens to attend to, which might
         # seem a bit unusual, but is taken from the original Transformer paper.
@@ -760,8 +760,10 @@ if __name__ == "__main__":
     inputs = tokenizer("This movie was great!", padding="max_length", truncation=True)
 
     model = BertForSequenceClassification.from_pretrained(huggingface_model_name, num_labels=2)
+    print("Using activation func: ", model.config.hidden_act)
     outputs = model(torch.Tensor(inputs["input_ids"]).int().unsqueeze(0))
-
+    class_score = torch.nn.functional.softmax(outputs.logits, dim=1)
+    class_preds = torch.where(class_score == class_score.max())
     model.relevance_propagation()
 
     print("Done!")
