@@ -1,5 +1,5 @@
-from baseline.models.ViT_paper import vit_base_patch16_224
-from baseline.models.ViT_ours import vit_base_patch16_224 as our_vit_base_patch16_224
+from baseline.models.ViT_paper import vit_base_patch16_224 as paper_base_model
+from baseline.models.ViT_ours import vit_base_patch16_224 as our_base_model
 from PIL import Image
 import torchvision.transforms as transforms
 import matplotlib.pyplot as plt
@@ -1013,7 +1013,6 @@ CLS2IDX = {0: 'tench, Tinca tinca',
            998: 'ear, spike, capitulum',
            999: 'toilet tissue, toilet paper, bathroom tissue'}
 
-
 def print_top_classes(predictions, **kwargs):
     # Print Top-5 predictions
     prob = torch.softmax(predictions, dim=1)
@@ -1033,102 +1032,41 @@ def print_top_classes(predictions, **kwargs):
             predictions[0, cls_idx], 100 * prob[0, cls_idx])
         print(output_string)
 
-# create heatmap from mask on image
-
-
-def show_cam_on_image(img, mask):
-    heatmap = cv2.applyColorMap(np.uint8(255 * mask), cv2.COLORMAP_JET)
-    heatmap = np.float32(heatmap) / 255
-    cam = heatmap + np.float32(img)
-    cam = cam / np.max(cam)
-    return cam
-
-
-def generate_visualization(original_image, attribution_generator, class_index=None, device="cuda"):
-    transformer_attribution = attribution_generator.generate_LRP(
-        original_image.unsqueeze(0).to(device),
-        method="transformer_attribution", index=class_index,
-        device=device
-    ).detach()
-
-    transformer_attribution = transformer_attribution.reshape(1, 1, 14, 14)
-    transformer_attribution = torch.nn.functional.interpolate(
-        transformer_attribution, scale_factor=16, mode='bilinear')
-    transformer_attribution = transformer_attribution.reshape(
-        224, 224).to(device).data.cpu().numpy()
-
-    transformer_attribution = (transformer_attribution - transformer_attribution.min()
-                               ) / (transformer_attribution.max() - transformer_attribution.min())
-    image_transformer_attribution = original_image.permute(1, 2, 0).data.cpu().numpy()
-    image_transformer_attribution = (
-        image_transformer_attribution - image_transformer_attribution.min()) / (
-        image_transformer_attribution.max() - image_transformer_attribution.min())
-    vis = show_cam_on_image(image_transformer_attribution, transformer_attribution)
-    vis = np.uint8(255 * vis)
-    vis = cv2.cvtColor(np.array(vis), cv2.COLOR_RGB2BGR)
-    return vis
-
-
-def compute_saliency_and_save(images, path, lrp, device):
-    first = True
-    with h5py.File(os.path.join(path, 'results.hdf5'), 'a') as f:
-        data_cam = f.create_dataset('vis',
-                                    (1, 1, 224, 224),
-                                    maxshape=(None, 1, 224, 224),
-                                    dtype=np.float32,
-                                    compression="gzip")
-        data_image = f.create_dataset('image',
-                                      (1, 3, 224, 224),
-                                      maxshape=(None, 3, 224, 224),
-                                      dtype=np.float32,
-                                      compression="gzip")
-        data_target = f.create_dataset('target',
-                                       (1,),
-                                       maxshape=(None,),
-                                       dtype=np.int32,
-                                       compression="gzip")
-        for batch_idx, (data, target) in enumerate(images):
-            if first:
-                first = False
-                data_cam.resize(data_cam.shape[0] + data.shape[0] - 1, axis=0)
-                data_image.resize(data_image.shape[0] + data.shape[0] - 1, axis=0)
-                data_target.resize(data_target.shape[0] + data.shape[0] - 1, axis=0)
-            else:
-                data_cam.resize(data_cam.shape[0] + data.shape[0], axis=0)
-                data_image.resize(data_image.shape[0] + data.shape[0], axis=0)
-                data_target.resize(data_target.shape[0] + data.shape[0], axis=0)
-
-            # Add data
-            data_image[-data.shape[0]:] = data.data.cpu().numpy()
-            data_target[-data.shape[0]:] = target.data.cpu().numpy()
-
-            target = target.to(device)
-
-            # data = normalize(data)
-            data = data.to(device)
-            data.requires_grad_()
-
-            index = None
-
-            Res = lrp.generate_LRP(
-                data, start_layer=1, index=index, device=device
-            ).reshape(data.shape[0], 1, 14, 14,)
-
-            Res = torch.nn.functional.interpolate(Res, scale_factor=16, mode='bilinear').to(device)
-
-            Res = (Res - Res.min()) / (Res.max() - Res.min())
-
-            data_cam[-data.shape[0]:] = Res.data.cpu().numpy()
-
-
-def normalize(tensor,
-              mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]):
+def normalize(tensor, mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]):
     dtype = tensor.dtype
     mean = torch.as_tensor(mean, dtype=dtype, device=tensor.device)
     std = torch.as_tensor(std, dtype=dtype, device=tensor.device)
     tensor.sub_(mean[None, :, None, None]).div_(std[None, :, None, None])
     return tensor
 
+def gen_raw_attr(base_model, image, device):
+    model = base_model().to(device)
+    model.eval()
+    attr_gen = LRP(model)
+
+    output = model(image.unsqueeze(0).to(device))
+    print_top_classes(output)
+
+    raw_attr = attr_gen.generate_LRP(
+        image.unsqueeze(0).to(device), method="transformer_attribution", device=device
+    ).detach()
+
+    return raw_attr
+
+def get_heatmap(raw_attr, max_=None):
+    raw_attr = raw_attr.reshape(1, 1, 14, 14)
+    attr = torch.nn.functional.interpolate(raw_attr, scale_factor=16, mode='bilinear')
+    attr = attr.reshape(224, 224).data.cpu().numpy()
+
+    if max_ is None:
+        max_ = attr.max()
+
+    attr = (attr - attr.min()) / (max_ - attr.min())
+    heatmap = cv2.applyColorMap(np.uint8(255 * attr), cv2.COLORMAP_JET)
+    heatmap = np.float32(heatmap) / 255
+    heatmap = np.uint8(255 * heatmap)
+    heatmap = cv2.cvtColor(np.array(heatmap), cv2.COLOR_RGB2BGR)
+    return heatmap
 
 def main():
     normalize = transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
@@ -1138,54 +1076,75 @@ def main():
         transforms.ToTensor(),
         normalize,
     ])
-    # initialize ViT pretrained
 
     cuda = torch.cuda.is_available()
     device = torch.device("cuda" if cuda else "cpu")
 
-    # model = vit_base_patch16_224().to(device)
-    model = our_vit_base_patch16_224().to(device)
-    model.eval()
-    attribution_generator = LRP(model)
     image = Image.open('samples/catdog.png')
     dog_cat_image = transform(image)
 
-    fig, axs = plt.subplots(1, 3)
+    '''
+    # Init original model and our model
+    model_paper = paper_base_model().to(device)
+    model_ours = our_base_model().to(device)
+    model_paper.eval()
+    model_ours.eval()
+
+    # Init attribution generators
+    attr_gen_paper = LRP(model_paper)
+    attr_gen_ours = LRP(model_ours)
+
+    # Load sample image
+    image = Image.open('samples/catdog.png')
+    dog_cat_image = transform(image)
+
+    # Compare predictions
+    output_paper = model_paper(dog_cat_image.unsqueeze(0).to(device))
+    output_ours = model_ours(dog_cat_image.unsqueeze(0).to(device))
+    print_top_classes(output_paper)
+    print_top_classes(output_ours)
+
+    # Generate attribution maps (before upscaling) for the predicted class
+    raw_attr_paper = attr_gen_paper.generate_LRP(
+        dog_cat_image.unsqueeze(0).to(device),
+        method="transformer_attribution", device=device
+    ).detach()
+    raw_attr_ours = attr_gen_ours.generate_LRP(
+        dog_cat_image.unsqueeze(0).to(device),
+        method="transformer_attribution", device=device
+    ).detach()
+    '''
+    raw_attr_paper = gen_raw_attr(paper_base_model, dog_cat_image, device)
+    raw_attr_ours = gen_raw_attr(our_base_model, dog_cat_image, device)
+
+    if torch.equal(raw_attr_paper, raw_attr_ours):
+        print('\n*** The two attribution maps ARE the same ***\n')
+    else:
+        print('\n*** The two attribution maps ARE NOT the same ***\n')
+
+    heatmap_paper = get_heatmap(raw_attr_paper)
+    heatmap_ours = get_heatmap(raw_attr_ours)
+    max_attr = np.maximum(raw_attr_paper.max(), raw_attr_ours.max())
+    heatmap_diff = get_heatmap(np.abs(raw_attr_paper - raw_attr_ours), max_=max_attr)
+    heatmap_diff_augmented = get_heatmap(np.abs(raw_attr_paper - raw_attr_ours))
+
+    fig, axs = plt.subplots(1, 5)
     axs[0].imshow(image)
     axs[0].axis('off')
-
-    output = model(dog_cat_image.unsqueeze(0).to(device))
-    # pdb.set_trace()
-    print_top_classes(output)
-
-    visualize = False
-
-    if visualize:
-        # cat - the predicted class
-        cat = generate_visualization(
-            dog_cat_image, attribution_generator=attribution_generator, device=device)
-
-        # dog
-        # generate visualization for class 243: 'bull mastiff'
-        dog = generate_visualization(
-            dog_cat_image, attribution_generator=attribution_generator, class_index=243,
-            device=device)
-
-        axs[1].imshow(cat)
-        axs[1].axis('off')
-        axs[2].imshow(dog)
-        axs[2].axis('off')
-        plt.show()
-    else:
-        images = []
-        image = Image.open('samples/dogbird.png')
-        dog_bird_image = transform(image)
-
-        images.append((dog_cat_image.unsqueeze(0), torch.tensor(282)))
-        # images.append((dog_cat_image, 243))
-        images.append((dog_bird_image.unsqueeze(0), torch.tensor(161)))
-        # images.append((dog_bird_image, 87))
-        compute_saliency_and_save(images, "results", attribution_generator, device)
+    axs[0].title.set_text('Original image')
+    axs[1].imshow(heatmap_paper)
+    axs[1].axis('off')
+    axs[1].title.set_text('Paper\'s heatmap')
+    axs[2].imshow(heatmap_ours)
+    axs[2].axis('off')  
+    axs[2].title.set_text('Our heatmap')  
+    axs[3].imshow(heatmap_diff)
+    axs[3].axis('off')
+    axs[3].title.set_text('Heatmap diff')
+    axs[4].imshow(heatmap_diff_augmented)
+    axs[4].axis('off')
+    axs[4].title.set_text('Heatmap diff augmented %.6f' % max_attr)
+    plt.show()
 
 
 if __name__ == "__main__":

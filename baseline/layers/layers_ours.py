@@ -1,10 +1,11 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import pdb
 
 __all__ = ['forward_hook', 'Clone', 'Add', 'Cat', 'ReLU', 'GELU', 'Dropout', 'BatchNorm2d',
            'Linear', 'MaxPool2d', 'AdaptiveAvgPool2d', 'AvgPool2d', 'Conv2d', 'Sequential',
-           'safe_divide', 'einsum', 'Softmax', 'IndexSelect', 'LayerNorm', 'AddEye']
+           'safe_divide', 'einsum', 'Softmax', 'IndexSelect', 'LayerNorm', 'AddEye', 'MatMul1', 'MatMul2']
 
 
 def safe_divide(a, b):
@@ -268,6 +269,53 @@ class Linear(nn.Linear, RelProp):
         R = alpha * activator_relevances - beta * inhibitor_relevances
 
         return R
+
+
+class MatMul1(RelProp):
+    # Inheriting from RelProp we get the forward hook that sets self.X = [q, k]     
+    def relprop(self, R):
+        '''
+        LRP_eps for matrix multiplication
+        STATUS: it works for the last block, but for rest cam_k is not the same as original repo (cam_q is OK)
+            The change is only in the LAST TOKEN C2[:, :, 196, :]. The first 0-195 are exactly the same as original paper
+        '''
+        Q = self.X[0]
+        K = self.X[1]
+
+        Z = self.forward([Q, K])
+        S = safe_divide(R, Z)
+        C1 = S @ K
+        C2 = S.permute(0,1,3,2) @ Q  # S is (1, 12, 197, 197). Need to transpose last 2 dims when mutliplying by Q
+        return [Q * C1, K * C2]
+
+    def forward(self, X):
+        # CHECKED: this is equivalent to the forward of matmul1 in original apper
+        assert len(X) == 2
+        return torch.einsum('bhid,bhjd->bhij', X[0], X[1])
+
+class MatMul2(RelProp):
+    def relprop(self, R):
+        '''
+        LRP_eps for matrix multiplication
+        '''
+        A = self.X[0]
+        V = self.X[1]
+
+        Z = self.forward([A, V])
+        S = safe_divide(R, Z)
+        '''
+        dims: 
+        S = (1, 12, 197, 64) = (1, h, s, Dh)
+        V = (1, 12, 197, 64) = (1, h, s, Dh)
+        A = (1, 12, 197, 197) = (1, h, s, s)    
+        '''
+        C1 = S @ V.permute(0,1,3,2)  # C1 = (1, 12, 197, 197)
+        C2 = S.permute(0,1,3,2) @ A  # C2 = (1, 12, 197, 64)
+        return [A * C1, V * C2.permute(0,1,3,2)]
+
+    def forward(self, X):
+        assert len(X) == 2
+        return torch.einsum('bhij,bhjd->bhid', X[0], X[1])
 
 
 class Conv2d(nn.Conv2d, RelProp):

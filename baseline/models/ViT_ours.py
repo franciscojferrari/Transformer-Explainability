@@ -8,6 +8,7 @@ from einops import rearrange
 from baseline.layers.layers_ours import *
 from baseline.layers.layer_helper import to_2tuple, trunc_normal_
 import torch.utils.model_zoo as model_zoo
+import pdb 
 
 _logger = logging.getLogger(__name__)
 
@@ -73,7 +74,7 @@ class Mlp(nn.Module):
 
     def relprop(self, cam, **kwargs):
         cam = self.drop.relprop(cam, **kwargs)
-        cam = self.fc2.relprop(cam, use_eps_rule=True, **kwargs)
+        cam = self.fc2.relprop(cam, use_eps_rule=False, **kwargs)
         cam = self.act.relprop(cam, **kwargs)
         cam = self.fc1.relprop(cam, **kwargs)
         return cam
@@ -89,8 +90,10 @@ class Attention(nn.Module):
 
         # A = Q*K^T
         self.matmul1 = einsum('bhid,bhjd->bhij')
+        self.matmul1_custom = MatMul1()
         # attn = A*V
         self.matmul2 = einsum('bhij,bhjd->bhid')
+        self.matmul2_custom = MatMul2()
 
         self.qkv = Linear(dim, dim * 3, bias=qkv_bias)
         self.attn_drop = Dropout(attn_drop)
@@ -142,6 +145,7 @@ class Attention(nn.Module):
         self.save_v(v)
 
         dots = self.matmul1([q, k]) * self.scale
+        dots = self.matmul1_custom([q, k]) * self.scale
 
         attn = self.softmax(dots)
         attn = self.attn_drop(attn)
@@ -150,6 +154,7 @@ class Attention(nn.Module):
         attn.register_hook(self.save_attn_gradients)
 
         out = self.matmul2([attn, v])
+        out = self.matmul2_custom([attn, v])
         out = rearrange(out, 'b h n d -> b n (h d)')
 
         out = self.proj(out)
@@ -162,7 +167,11 @@ class Attention(nn.Module):
         cam = rearrange(cam, 'b n (h d) -> b h n d', h=self.num_heads)
 
         # attn = A*V
-        (cam1, cam_v) = self.matmul2.relprop(cam, **kwargs)
+        #(cam1, cam_v) = self.matmul2.relprop(cam, **kwargs)
+        #(cam1_2, cam_v_2) = self.matmul2.relprop(cam, **kwargs)
+        (cam1, cam_v) = self.matmul2_custom.relprop(cam)
+        #print('%d\t%d' % (torch.equal(cam1, cam1_2), torch.equal(cam_v, cam_v_2)))
+
         cam1 /= 2
         cam_v /= 2
 
@@ -173,7 +182,9 @@ class Attention(nn.Module):
         cam1 = self.softmax.relprop(cam1, **kwargs)
 
         # A = Q*K^T
-        (cam_q, cam_k) = self.matmul1.relprop(cam1, **kwargs)
+        #(cam_q2, cam_k2) = self.matmul1.relprop(cam1, **kwargs)
+        (cam_q, cam_k) = self.matmul1_custom.relprop(cam1)
+        #print('%d\t%d' % (torch.equal(cam_q, cam_q2), torch.equal(cam_k, cam_k2)))
         cam_q /= 2
         cam_k /= 2
 
