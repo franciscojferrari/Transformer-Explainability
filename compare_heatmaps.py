@@ -10,6 +10,8 @@ import pdb
 from attribution_generators.ViT_explanation_generator import LRP
 import h5py
 import os
+import time
+
 
 
 CLS2IDX = {0: 'tench, Tinca tinca',
@@ -1039,7 +1041,7 @@ def normalize(tensor, mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]):
     tensor.sub_(mean[None, :, None, None]).div_(std[None, :, None, None])
     return tensor
 
-def gen_raw_attr(base_model, image, device):
+def gen_raw_attr(base_model, image, device, model_name=None):
     model = base_model().to(device)
     model.eval()
     attr_gen = LRP(model)
@@ -1047,9 +1049,12 @@ def gen_raw_attr(base_model, image, device):
     output = model(image.unsqueeze(0).to(device))
     print_top_classes(output)
 
+    start_time = time.time()
     raw_attr = attr_gen.generate_LRP(
         image.unsqueeze(0).to(device), method="transformer_attribution", device=device
     ).detach()
+    print(model_name)
+    print('Attention computation exec time:\t%s sec' % (time.time() - start_time))
 
     return raw_attr
 
@@ -1083,39 +1088,8 @@ def main():
     image = Image.open('samples/catdog.png')
     dog_cat_image = transform(image)
 
-    '''
-    # Init original model and our model
-    model_paper = paper_base_model().to(device)
-    model_ours = our_base_model().to(device)
-    model_paper.eval()
-    model_ours.eval()
-
-    # Init attribution generators
-    attr_gen_paper = LRP(model_paper)
-    attr_gen_ours = LRP(model_ours)
-
-    # Load sample image
-    image = Image.open('samples/catdog.png')
-    dog_cat_image = transform(image)
-
-    # Compare predictions
-    output_paper = model_paper(dog_cat_image.unsqueeze(0).to(device))
-    output_ours = model_ours(dog_cat_image.unsqueeze(0).to(device))
-    print_top_classes(output_paper)
-    print_top_classes(output_ours)
-
-    # Generate attribution maps (before upscaling) for the predicted class
-    raw_attr_paper = attr_gen_paper.generate_LRP(
-        dog_cat_image.unsqueeze(0).to(device),
-        method="transformer_attribution", device=device
-    ).detach()
-    raw_attr_ours = attr_gen_ours.generate_LRP(
-        dog_cat_image.unsqueeze(0).to(device),
-        method="transformer_attribution", device=device
-    ).detach()
-    '''
-    raw_attr_paper = gen_raw_attr(paper_base_model, dog_cat_image, device)
-    raw_attr_ours = gen_raw_attr(our_base_model, dog_cat_image, device)
+    raw_attr_paper = gen_raw_attr(paper_base_model, dog_cat_image, device, model_name='Original paper implementation')
+    raw_attr_ours = gen_raw_attr(our_base_model, dog_cat_image, device, model_name='Our implementation')
 
     if torch.equal(raw_attr_paper, raw_attr_ours):
         print('\n*** The two attribution maps ARE the same ***\n')

@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 from einops import rearrange
 from baseline.layers.layers_ours import *
+from baseline.layers.layers_paper import Clone, einsum  # imported for comparison purposes
 from baseline.layers.layer_helper import to_2tuple, trunc_normal_
 import torch.utils.model_zoo as model_zoo
 import pdb 
@@ -182,6 +183,7 @@ class Attention(nn.Module):
         cam1 = self.softmax.relprop(cam1, **kwargs)
 
         # A = Q*K^T
+        #(cam_q, cam_k) = self.matmul1.relprop(cam1, **kwargs)
         #(cam_q2, cam_k2) = self.matmul1.relprop(cam1, **kwargs)
         (cam_q, cam_k) = self.matmul1_custom.relprop(cam1)
         #print('%d\t%d' % (torch.equal(cam_q, cam_q2), torch.equal(cam_k, cam_k2)))
@@ -208,26 +210,35 @@ class Block(nn.Module):
 
         self.add1 = Add()
         self.add2 = Add()
-        self.clone1 = Clone()
-        self.clone2 = Clone()
-
+        #self.clone1 = Clone()
+        #self.clone2 = Clone()
+    '''
     def forward(self, x):
         x1, x2 = self.clone1(x, 2)
         x = self.add1([x1, self.attn(self.norm1(x2))])
         x1, x2 = self.clone2(x, 2)
         x = self.add2([x1, self.mlp(self.norm2(x2))])
         return x
+    '''
+
+    def forward(self, x):
+        x = self.add1([x, self.attn(self.norm1(x))])
+        x = self.add2([x, self.mlp(self.norm2(x))])
+        return x
 
     def relprop(self, cam, **kwargs):
         (cam1, cam2) = self.add2.relprop(cam, **kwargs)
         cam2 = self.mlp.relprop(cam2, **kwargs)
         cam2 = self.norm2.relprop(cam2, **kwargs)
-        cam = self.clone2.relprop((cam1, cam2), **kwargs)
+        #cam = self.clone2.relprop((cam1, cam2), **kwargs)
+        cam = cam1 + cam2   # CHECKED: equivalent using clone. relprop is almost the same (but for some small differences due to numerical precision)
+                            # Also, we don't need a clone function bc we don't need to save X in the forward loop
 
         (cam1, cam2) = self.add1.relprop(cam, **kwargs)
         cam2 = self.attn.relprop(cam2, **kwargs)
         cam2 = self.norm1.relprop(cam2, **kwargs)
-        cam = self.clone1.relprop((cam1, cam2), **kwargs)
+        #cam = self.clone1.relprop((cam1, cam2), **kwargs)
+        cam = cam1 + cam2
         return cam
 
 
@@ -352,7 +363,6 @@ class VisionTransformer(nn.Module):
         # print(kwargs)
         # print("conservation 1", cam.sum())
         cam = self.head.relprop(cam, **kwargs)
-        cam = cam.unsqueeze(1)
         cam = self.pool.relprop(cam, **kwargs)
         cam = self.norm.relprop(cam, **kwargs)
         for blk in reversed(self.blocks):
