@@ -180,6 +180,8 @@ class Add(RelEpsilon):
     def forward(self, inputs):
         return torch.add(*inputs)
     
+    
+
     def relevance_propagation(self, prev_rel, renormalize=True):
         X, Y = self.module_input
         module_output = self.forward(self.module_input)
@@ -195,12 +197,22 @@ class Add(RelEpsilon):
         if not renormalize:
             return (rel_X, rel_Y)
         
-        rel_X_sum = rel_X.sum(dim=list(range(1, rel_X.dim())))
-        rel_Y_sum = rel_Y.sum(dim=list(range(1, rel_Y.dim())))
+        # Tried to do it for each batch separately, but this does not work apparently
+        # rel_X_sum = rel_X.sum(dim=list(range(1, rel_X.dim())))
+        # rel_Y_sum = rel_Y.sum(dim=list(range(1, rel_Y.dim())))
 
-        rel_X_re = rel_X * ((rel_X_sum.abs()/(rel_X_sum.abs() + rel_Y_sum.abs())) * (prev_rel.sum(dim=list(range(1, prev_rel.dim()))) / rel_X_sum)).unsqueeze(1)
-        rel_Y_re = rel_Y * ((rel_Y_sum.abs()/(rel_X_sum.abs() + rel_Y_sum.abs())) * (prev_rel.sum(dim=list(range(1, prev_rel.dim()))) / rel_Y_sum)).unsqueeze(1)
+        # X_frac = divide_add_epsilon(rel_X_sum.abs(), (rel_X_sum.abs() + rel_Y_sum.abs()) * prev_rel.sum(dim=list(range(1, prev_rel.dim()))))
+        # Y_frac = divide_add_epsilon(rel_Y_sum.abs(), (rel_X_sum.abs() + rel_Y_sum.abs()) * prev_rel.sum(dim=list(range(1, prev_rel.dim()))))
+        # rel_X_re = rel_X * divide_add_epsilon(X_frac.T, rel_X_sum).unsqueeze(1)
+        # rel_Y_re = rel_Y * divide_add_epsilon(Y_frac.T, rel_Y_sum).unsqueeze(1)
 
+        rel_X_sum = rel_X.sum()
+        rel_Y_sum = rel_Y.sum()
+
+        X_frac = divide_add_epsilon(rel_X_sum.abs(), rel_X_sum.abs() + rel_Y_sum.abs()) * prev_rel.sum()
+        Y_frac = divide_add_epsilon(rel_Y_sum.abs(), rel_X_sum.abs() + rel_Y_sum.abs()) * prev_rel.sum()
+        rel_X_re = rel_X * divide_add_epsilon(X_frac, rel_X_sum)
+        rel_Y_re = rel_Y * divide_add_epsilon(Y_frac, rel_Y_sum)
         return (rel_X_re, rel_Y_re)
 
 if __name__ == "__main__":
