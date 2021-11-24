@@ -1,7 +1,8 @@
+from re import S
 import torch
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from transformers.models.bert.configuration_bert import BertConfig
-from transformers.models.bert.modeling_bert import BertPooler, BertPreTrainedModel
+from transformers.models.bert.modeling_bert import BertPreTrainedModel
 from transformers.modeling_outputs import BaseModelOutputWithPoolingAndCrossAttentions, BaseModelOutputWithPastAndCrossAttentions, SequenceClassifierOutput
 from transformers.activations import ACT2FN 
 
@@ -18,17 +19,6 @@ from transformers.modeling_utils import (
 
 # Base model of BERT gotten from huggingfaces: https://github.com/huggingface/transformers/blob/master/src/transformers/models/bert/modeling_bert.py
 class BertModel(BertPreTrainedModel):
-    """
-    The model can behave as an encoder (with only self-attention) as well as a decoder, in which case a layer of
-    cross-attention is added between the self-attention layers, following the architecture described in `Attention is
-    all you need <https://arxiv.org/abs/1706.03762>`__ by Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit,
-    Llion Jones, Aidan N. Gomez, Lukasz Kaiser and Illia Polosukhin.
-    To behave as an decoder the model needs to be initialized with the :obj:`is_decoder` argument of the configuration
-    set to :obj:`True`. To be used in a Seq2Seq model, the model needs to initialized with both :obj:`is_decoder`
-    argument and :obj:`add_cross_attention` set to :obj:`True`; an :obj:`encoder_hidden_states` is then expected as an
-    input to the forward pass.
-    """
-
     def __init__(self, config, add_pooling_layer=True):
         super().__init__(config)
         self.config = config
@@ -36,6 +26,8 @@ class BertModel(BertPreTrainedModel):
         self.embeddings = BertEmbeddings(config)
         self.encoder = BertEncoder(config)
 
+        # Pooler does not need relevance propagation according to Hila Chefer,
+        # beacuse it does not impact token importance
         self.pooler = BertPooler(config) if add_pooling_layer else None
 
         self.init_weights()
@@ -47,10 +39,6 @@ class BertModel(BertPreTrainedModel):
         self.embeddings.word_embeddings = value
 
     def _prune_heads(self, heads_to_prune):
-        """
-        Prunes heads of the model. heads_to_prune: dict of {layer_num: list of heads to prune in this layer} See base
-        class PreTrainedModel
-        """
         for layer, heads in heads_to_prune.items():
             self.encoder.layer[layer].attention.prune_heads(heads)
 
@@ -166,7 +154,7 @@ class BertModel(BertPreTrainedModel):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
-        sequence_output = encoder_outputs[0]
+        sequence_output = encoder_outputs.last_hidden_state
         pooled_output = self.pooler(sequence_output) if self.pooler is not None else None
 
         if not return_dict:
@@ -181,22 +169,47 @@ class BertModel(BertPreTrainedModel):
             cross_attentions=encoder_outputs.cross_attentions,
         )
     
-    def relevance_propagation(self, R):
-        pass
+    def relevance_propagation(self, prev_rel, **kwargs):
+        rel = self.pooler.relevance_propagation(prev_rel, **kwargs)
+        rel = self.encoder.relevance_propagation(rel, **kwargs)
+        return rel
+
+class BertPooler(torch.nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.index_select = IndexSelect()
+        self.dense = Linear(config.hidden_size, config.hidden_size)
+        self.activation = torch.nn.Tanh()
+
+    def forward(self, hidden_states):
+        # We "pool" the model by simply taking the hidden state corresponding
+        # to the first token.
+        # first_token_tensor = hidden_states[:, 0]
+        first_token_tensor = self.index_select(hidden_states, 1, torch.tensor(0))
+        pooled_output = self.dense(first_token_tensor)
+        pooled_output = self.activation(pooled_output)
+        return pooled_output
+    
+    def relevance_propagation(self, prev_rel, **kwargs):
+        # Hila Chefer doesn't care about tanh (self.actiavtion not propagated)
+        rel = self.dense.relevance_propagation(prev_rel, **kwargs)
+        rel = self.index_select.relevance_propagation(rel, **kwargs)
+        return rel
+
 
 class BertEmbeddings(torch.nn.Module):
     """Construct the embeddings from word, position and token_type embeddings."""
 
     def __init__(self, config):
         super().__init__()
-        self.word_embeddings = Embedding(config.vocab_size, config.hidden_size, padding_idx=config.pad_token_id)
-        self.position_embeddings = Embedding(config.max_position_embeddings, config.hidden_size)
-        self.token_type_embeddings = Embedding(config.type_vocab_size, config.hidden_size)
+        self.word_embeddings = torch.nn.Embedding(config.vocab_size, config.hidden_size, padding_idx=config.pad_token_id)
+        self.position_embeddings = torch.nn.Embedding(config.max_position_embeddings, config.hidden_size)
+        self.token_type_embeddings = torch.nn.Embedding(config.type_vocab_size, config.hidden_size)
 
         # self.LayerNorm is not snake-cased to stick with TensorFlow model variable name and be able to load
         # any TensorFlow checkpoint file
-        self.LayerNorm = LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
-        self.dropout = Dropout(config.hidden_dropout_prob)
+        self.LayerNorm = torch.nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.dropout = torch.nn.Dropout(config.hidden_dropout_prob)
         # position_ids (1, len position emb) is contiguous in memory and exported when serialized
         self.position_embedding_type = getattr(config, "position_embedding_type", "absolute")
         self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))
@@ -311,7 +324,7 @@ class BertEncoder(torch.nn.Module):
                     output_attentions,
                 )
 
-            hidden_states = layer_outputs[0]
+            hidden_states = layer_outputs[0] # Tuple indexing
             if use_cache:
                 next_decoder_cache += (layer_outputs[-1],)
             if output_attentions:
@@ -342,8 +355,11 @@ class BertEncoder(torch.nn.Module):
             cross_attentions=all_cross_attentions,
         )
     
-    def relevance_propagation(self, R):
-        pass
+    def relevance_propagation(self, prev_rel, **kwargs):
+        rel = prev_rel
+        for i, layer_module in enumerate(reversed(self.layer)):
+            rel = layer_module.relevance_propagation(rel, **kwargs)
+        return rel
 
 class BertAttention(torch.nn.Module):
     def __init__(self, config):
@@ -351,6 +367,7 @@ class BertAttention(torch.nn.Module):
         self.self = BertSelfAttention(config)
         self.output = BertSelfOutput(config)
         self.pruned_heads = set()
+        self.clone = Clone()
 
     def prune_heads(self, heads):
         if len(heads) == 0:
@@ -380,8 +397,9 @@ class BertAttention(torch.nn.Module):
         past_key_value=None,
         output_attentions=False,
     ):
+        hidden_states1, hidden_states2 = self.clone(hidden_states)
         self_outputs = self.self(
-            hidden_states,
+            hidden_states1,
             attention_mask,
             head_mask,
             encoder_hidden_states,
@@ -389,12 +407,15 @@ class BertAttention(torch.nn.Module):
             past_key_value,
             output_attentions,
         )
-        attention_output = self.output(self_outputs[0], hidden_states)
+        attention_output = self.output(self_outputs[0], hidden_states2)
         outputs = (attention_output,) + self_outputs[1:]  # add attentions if we output them
         return outputs
     
-    def relevance_propagation(self, R):
-        pass
+    def relevance_propagation(self, prev_rel, **kwargs):
+        rel = self.output.relevance_propagation(prev_rel, **kwargs)
+        # self.self is for SelfAttention, weird naming scheme but whatever
+        rel = self.self.relevance_propagation(prev_rel, **kwargs)
+        return rel
 
 class BertSelfAttention(torch.nn.Module):
     def __init__(self, config):
@@ -409,17 +430,35 @@ class BertSelfAttention(torch.nn.Module):
         self.attention_head_size = int(config.hidden_size / config.num_attention_heads)
         self.all_head_size = self.num_attention_heads * self.attention_head_size
 
+        self.matmul1 = MatMul()
+        self.matmul2 = MatMul()
+        self.mul = Mul()
+        self.add = Add()
+        self.cloneN = CloneN()
+
         self.query = Linear(config.hidden_size, self.all_head_size)
         self.key = Linear(config.hidden_size, self.all_head_size)
         self.value = Linear(config.hidden_size, self.all_head_size)
 
-        self.dropout = Dropout(config.attention_probs_dropout_prob)
+        self.transpose_for_scores_query = TransposeForScores()
+        self.transpose_for_scores_key = TransposeForScores()
+        self.transpose_for_scores_value = TransposeForScores()
+
+        self.head_mask = None
+        self.attention_mask = None
+        self.attention_relevance = None
+        self.attention_grad = None
+
+        self.dropout = torch.nn.Dropout(config.attention_probs_dropout_prob)
         self.position_embedding_type = getattr(config, "position_embedding_type", "absolute")
         if self.position_embedding_type == "relative_key" or self.position_embedding_type == "relative_key_query":
             self.max_position_embeddings = config.max_position_embeddings
-            self.distance_embedding = nn.Embedding(2 * config.max_position_embeddings - 1, self.attention_head_size)
+            self.distance_embedding = torch.nn.Embedding(2 * config.max_position_embeddings - 1, self.attention_head_size)
 
         self.is_decoder = config.is_decoder
+
+    def save_attention_grad(self, grad):
+        self.attention_grad = grad
 
     def transpose_for_scores(self, x):
         new_x_shape = x.size()[:-1] + (self.num_attention_heads, self.attention_head_size)
@@ -436,7 +475,10 @@ class BertSelfAttention(torch.nn.Module):
         past_key_value=None,
         output_attentions=False,
     ):
-        mixed_query_layer = self.query(hidden_states)
+        self.head_mask = head_mask
+        self.attention_mask = attention_mask
+        hidden_states1, hidden_states2, hidden_states3 = self.cloneN(hidden_states, 3)
+        mixed_query_layer = self.query(hidden_states1)
 
         # If this is instantiated as a cross-attention module, the keys
         # and values come from an encoder; the attention mask needs to be
@@ -449,19 +491,19 @@ class BertSelfAttention(torch.nn.Module):
             value_layer = past_key_value[1]
             attention_mask = encoder_attention_mask
         elif is_cross_attention:
-            key_layer = self.transpose_for_scores(self.key(encoder_hidden_states))
-            value_layer = self.transpose_for_scores(self.value(encoder_hidden_states))
+            key_layer = self.transpose_for_scores_key(self.key(encoder_hidden_states), self.num_attention_heads, self.attention_head_size)
+            value_layer = self.transpose_for_scores_value(self.value(encoder_hidden_states), self.num_attention_heads, self.attention_head_size)
             attention_mask = encoder_attention_mask
         elif past_key_value is not None:
-            key_layer = self.transpose_for_scores(self.key(hidden_states))
-            value_layer = self.transpose_for_scores(self.value(hidden_states))
+            key_layer = self.transpose_for_scores_key(self.key(hidden_states2), self.num_attention_heads, self.attention_head_size)
+            value_layer = self.transpose_for_scores_value(self.value(hidden_states3), self.num_attention_heads, self.attention_head_size)
             key_layer = torch.cat([past_key_value[0], key_layer], dim=2)
             value_layer = torch.cat([past_key_value[1], value_layer], dim=2)
         else:
-            key_layer = self.transpose_for_scores(self.key(hidden_states))
-            value_layer = self.transpose_for_scores(self.value(hidden_states))
+            key_layer = self.transpose_for_scores_key(self.key(hidden_states2), self.num_attention_heads, self.attention_head_size)
+            value_layer = self.transpose_for_scores_value(self.value(hidden_states3), self.num_attention_heads, self.attention_head_size)
 
-        query_layer = self.transpose_for_scores(mixed_query_layer)
+        query_layer = self.transpose_for_scores_query(mixed_query_layer, self.num_attention_heads, self.attention_head_size)
 
         if self.is_decoder:
             # if cross_attention save Tuple(torch.Tensor, torch.Tensor) of all cross attention key/value_states.
@@ -474,7 +516,7 @@ class BertSelfAttention(torch.nn.Module):
             past_key_value = (key_layer, value_layer)
 
         # Take the dot product between "query" and "key" to get the raw attention scores.
-        attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
+        attention_scores = self.matmul1((query_layer, key_layer.transpose(-1, -2)))
 
         if self.position_embedding_type == "relative_key" or self.position_embedding_type == "relative_key_query":
             seq_length = hidden_states.size()[1]
@@ -495,21 +537,21 @@ class BertSelfAttention(torch.nn.Module):
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
         if attention_mask is not None:
             # Apply the attention mask is (precomputed for all layers in BertModel forward() function)
-            attention_scores = attention_scores + attention_mask
+            attention_scores = self.add((attention_scores, attention_mask))
 
         # Normalize the attention scores to probabilities.
-        # SANDORNOTE: This is the what we want to get the relevance of
-        attention_probs = Softmax(dim=-1)(attention_scores)
-
+        # SANDORNOTE: This is the what we want to get the relevance of (post-softmax)
+        attention_probs = F.softmax(attention_scores, dim=-1).requires_grad_(True)
+        # attention_probs.register_hook(self.save_attention_grad) # This seems to be pointless
         # This is actually dropping out entire tokens to attend to, which might
         # seem a bit unusual, but is taken from the original Transformer paper.
         attention_probs = self.dropout(attention_probs)
 
         # Mask heads if we want to
         if head_mask is not None:
-            attention_probs = attention_probs * head_mask
+            attention_probs = self.mul((attention_probs, head_mask))
 
-        context_layer = torch.matmul(attention_probs, value_layer)
+        context_layer = self.matmul2((attention_probs, value_layer))
 
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
         new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
@@ -521,38 +563,70 @@ class BertSelfAttention(torch.nn.Module):
             outputs = outputs + (past_key_value,)
         return outputs
     
-    def relevance_propagation(self, R):
-        pass
+    def relevance_propagation(self, prev_rel, **kwargs):
+        # Hila chefer assumes we don't output output_attentions == False
+        rel = self.transpose_for_scores(prev_rel) # Undo permutation of context layer
+
+        (rel_attn_probs, rel_value) = self.matmul2.relevance_propagation(rel, **kwargs)
+        if self.head_mask is not None:
+            (rel_attn_probs, rel_head_mask) = self.mul.relevance_propagation(rel_attn_probs, **kwargs)
+        self.attention_relevance = rel_attn_probs
+        
+        if self.attention_mask is not None:
+            (rel_attn_probs, rel_attention_mask) = self.add.relevance_propagation(rel_attn_probs, **kwargs)
+
+        (rel_query, rel_key) = self.matmul1.relevance_propagation(rel_attn_probs, **kwargs)
+
+        rel_query = self.transpose_for_scores_query.relevance_propagation(rel_query, **kwargs)
+        rel_query = self.query.relevance_propagation(rel_query, **kwargs)
+
+        rel_key = self.transpose_for_scores_key.relevance_propagation(rel_key.transpose(-1, -2), **kwargs)
+        rel_key = self.key.relevance_propagation(rel_key, **kwargs)
+
+        rel_value = self.transpose_for_scores_value.relevance_propagation(rel_value, **kwargs)
+        rel_value = self.value.relevance_propagation(rel_value, **kwargs)
+        
+        rel = self.cloneN.relevance_propagation((rel_query, rel_key, rel_value), **kwargs)
+
+        return rel
 
 class BertSelfOutput(torch.nn.Module):
     def __init__(self, config):
         super().__init__()
         self.dense = Linear(config.hidden_size, config.hidden_size)
-        self.LayerNorm = LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
-        self.dropout = Dropout(config.hidden_dropout_prob)
+        self.skip = Add()
+        self.LayerNorm = torch.nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.dropout = torch.nn.Dropout(config.hidden_dropout_prob)
 
     def forward(self, hidden_states, input_tensor):
         hidden_states = self.dense(hidden_states)
         hidden_states = self.dropout(hidden_states)
-        hidden_states = self.LayerNorm(hidden_states + input_tensor)
+        hidden_states = self.LayerNorm(self.skip((hidden_states, input_tensor)))
         return hidden_states
-    def relevance_propagation(self, R):
-        pass
+    def relevance_propagation(self, prev_rel, **kwargs):
+        (rel, rel_residual) = self.skip.relevance_propagation(prev_rel, **kwargs)
+        rel = self.dense.relevance_propagation(prev_rel, **kwargs)
+        return (rel, rel_residual)
+        
 
 class BertOutput(torch.nn.Module):
+    # Bert output is a little extra feed-forward, layernorm and skip-connection it seems
     def __init__(self, config):
         super().__init__()
         self.dense = Linear(config.intermediate_size, config.hidden_size)
-        self.LayerNorm = LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
-        self.dropout = Dropout(config.hidden_dropout_prob)
+        self.skip = Add()
+        self.LayerNorm = torch.nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.dropout = torch.nn.Dropout(config.hidden_dropout_prob)
 
     def forward(self, hidden_states, input_tensor):
         hidden_states = self.dense(hidden_states)
         hidden_states = self.dropout(hidden_states)
-        hidden_states = self.LayerNorm(hidden_states + input_tensor)
+        hidden_states = self.LayerNorm(self.skip((hidden_states, input_tensor)))
         return hidden_states
-    def relevance_propagation(self, R):
-        pass
+    def relevance_propagation(self, prev_rel, **kwargs):
+        (rel, rel_residual) = self.skip.relevance_propagation(prev_rel, **kwargs)
+        rel = self.dense.relevance_propagation(rel, **kwargs)
+        return (rel, rel_residual)
 
 class BertIntermediate(torch.nn.Module):
     def __init__(self, config):
@@ -568,8 +642,9 @@ class BertIntermediate(torch.nn.Module):
         hidden_states = self.intermediate_act_fn(hidden_states)
         return hidden_states
 
-    def relevance_propagation(self, R):
-        pass
+    def relevance_propagation(self, prev_rel, **kwargs):
+        rel = self.dense.relevance_propagation(prev_rel, **kwargs)
+        return rel
 
 class BertLayer(torch.nn.Module):
     def __init__(self, config):
@@ -583,6 +658,7 @@ class BertLayer(torch.nn.Module):
             if not self.is_decoder:
                 raise ValueError(f"{self} should be used as a decoder model if cross attention is added")
             self.crossattention = BertAttention(config)
+        self.clone = Clone() # Class only for cloning into two tensors
         self.intermediate = BertIntermediate(config)
         self.output = BertOutput(config)
 
@@ -605,7 +681,7 @@ class BertLayer(torch.nn.Module):
             output_attentions=output_attentions,
             past_key_value=self_attn_past_key_value,
         )
-        attention_output = self_attention_outputs[0]
+        attention_output = self_attention_outputs[0] # Tuple indexing
 
         # if decoder, the last output is tuple of self-attn cache
         if self.is_decoder:
@@ -650,12 +726,21 @@ class BertLayer(torch.nn.Module):
 
         return outputs
     
-    def relevance_propagation(self, R):
-        pass
+    def relevance_propagation(self, prev_rel, **kwargs):
+        # --- Chunked ---
+        (rel, rel_residual) = self.output.relevance_propagation(prev_rel, **kwargs)
+        rel = self.intermediate.relevance_propagation(rel, **kwargs)
+        # --- Chunked ---
+        if self.is_decoder:
+            pass # Decoder is not used for classification
+        rel = self.clone.relevance_propagation((rel, rel_residual), **kwargs)
+        rel = self.attention.relevance_propagation(rel, **kwargs) 
+        return rel
 
     def feed_forward_chunk(self, attention_output):
-        intermediate_output = self.intermediate(attention_output)
-        layer_output = self.output(intermediate_output, attention_output)
+        attention_output1, attention_output2 = self.clone(attention_output)
+        intermediate_output = self.intermediate(attention_output1)
+        layer_output = self.output(intermediate_output, attention_output2)
         return layer_output
 
 class BertForSequenceClassification(BertPreTrainedModel):
@@ -668,7 +753,8 @@ class BertForSequenceClassification(BertPreTrainedModel):
         classifier_dropout = (
             config.classifier_dropout if config.classifier_dropout is not None else config.hidden_dropout_prob
         )
-        self.dropout = Dropout(classifier_dropout)
+
+        self.dropout = torch.nn.Dropout(classifier_dropout)
         self.classifier = Linear(config.hidden_size, config.num_labels)
 
         self.init_weights()
@@ -706,7 +792,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
             return_dict=return_dict,
         )
 
-        pooled_output = outputs[1]
+        pooled_output = outputs.pooler_output
 
         pooled_output = self.dropout(pooled_output)
         logits = self.classifier(pooled_output)
@@ -743,13 +829,15 @@ class BertForSequenceClassification(BertPreTrainedModel):
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
         )
-    def relevance_propagation(self, R):
-        pass
+    def relevance_propagation(self, prev_rel, **kwargs):
+        rel = self.classifier.relevance_propagation(prev_rel, **kwargs)
+        rel = self.bert.relevance_propagation(rel, **kwargs)
+        return rel
 
 
 if __name__ == "__main__":
 
-    huggingface_model_name = "bert-base-uncased"
+    huggingface_model_name = "textattack/bert-base-uncased-SST-2"
     # from transformers import AutoConfig
 
     # non_pretrained_model = BertForSequenceClassification(AutoConfig.from_pretrained(huggingface_model_name))
@@ -763,8 +851,8 @@ if __name__ == "__main__":
     print("Using activation func: ", model.config.hidden_act)
     outputs = model(torch.Tensor(inputs["input_ids"]).int().unsqueeze(0))
     class_score = torch.nn.functional.softmax(outputs.logits, dim=1)
-    class_preds = torch.where(class_score == class_score.max())
-    model.relevance_propagation()
+    class_preds = torch.argmax(class_score, dim=1)
+    rel = model.relevance_propagation(class_preds, alpha=1)
 
     print("Done!")
 

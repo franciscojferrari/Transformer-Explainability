@@ -4,7 +4,6 @@ from torch import autograd
 from torch.autograd import grad
 from torch.nn import functional as F
 from torch.nn import modules
-import hila_layers
 
 def divide_add_epsilon(num, den, epsilon=1e-9):
     # Add epsilon to denominator
@@ -35,10 +34,9 @@ class Rel(torch.nn.Module):
         self.grad_wrt_output = None
         self.module_output = None
         self.module_input = None
-        self.eval_and_hook()
+        self.hook()
 
-    def eval_and_hook(self):
-        self.eval()
+    def hook(self):
         self.register_full_backward_hook(backward_hook)
         self.register_forward_hook(forward_hook)
 
@@ -46,17 +44,17 @@ class Rel(torch.nn.Module):
         return prev_rel
 
 class RelDeepTaylor(Rel):
-    def relevance_propagation(self, prev_rel):
+    def relevance_propagation(self, prev_rel, **kwargs):
         output = self.forward(self.module_input)
         frac = prev_rel / output
-        grad = torch.autograd.grad(output, self.module_input, frac, retain_graph=True)[0]
+        grad = torch.autograd.grad(output, self.module_input, frac, retain_graph=True)
         
         if torch.is_tensor(self.module_input):
             return self.module_input * grad
         else:
             rels = []
-            for input in self.module_input:
-                rels.append(input * grad)
+            for i, input in enumerate(self.module_input):
+                rels.append(input * grad[i])
             return rels
 
 class RelEpsilon(Rel):
@@ -132,45 +130,120 @@ class RelGeLu(RelAlphaBeta):
 
         return alpha * pos_rel - beta * neg_rel
 
-class Embedding(torch.nn.Embedding, Rel):
-    pass
+class TransposeForScores(torch.nn.Module):
+    # Wonky operation in BertSelfAttention
+    def forward(self, input, num_attention_heads, attention_head_size):
+        new_x_shape = input.size()[:-1] + (num_attention_heads, attention_head_size)
+        input = input.view(*new_x_shape)
+        return input.permute(0, 2, 1, 3)
+    # We just need to permute it back
+    def relevance_propagation(self, prev_rel, alpha=1):
+        return prev_rel.permute(0, 2, 1, 3).flatten(2)
 
-class LayerNorm(torch.nn.LayerNorm, Rel):
-    pass
+class CloneN(torch.nn.Module):
+    def forward(self, input, N):
+        self.module_input = input
+        self.N = N
+        return (input, ) * N
+    
+    def relevance_propagation(self, prev_rel, alpha=1):
+        frac = [divide_add_epsilon(r, self.module_input) for r in prev_rel]
+        grad_times_frac = torch.autograd.grad((self.module_input, )* self.N, self.module_input, frac)[0]
+        rel = self.module_input * grad_times_frac
+        return rel
 
-class Dropout(torch.nn.Dropout, Rel):
-    pass
+class Clone(torch.nn.Module):
+    # Simplified clone for returning two of the same tensors
+    def forward(self, input):
+        self.module_input = input
+        return (input, input)
 
+    def relevance_propagation(self, prev_rel, alpha=1):
+        frac = (divide_add_epsilon(prev_rel[0], self.module_input), divide_add_epsilon(prev_rel[1], self.module_input))
+        grad_times_frac = torch.autograd.grad((self.module_input, )* 2, self.module_input, frac)[0]
+        rel = self.module_input * grad_times_frac
+        return rel
+
+class IndexSelect(torch.nn.Module):
+    # Input tensor
+    # Dimension (what position the index is in [..., index, ...])
+    # The index itself as a torch.Tensor
+    def forward(self, inputs, dim, indices):
+        self.module_input = [inputs, dim, indices] 
+        return torch.index_select(inputs, dim, indices)
+
+    def relevance_propagation(self, prev_rel, **kwargs):
+        output = torch.index_select(*self.module_input)
+        frac = prev_rel / output
+        grad = torch.autograd.grad(output, self.module_input[0], frac, retain_graph=True)
+        
+        if torch.is_tensor(self.module_input[0]):
+            return self.module_input[0] * grad[0]
+        else:
+            return (self.module_input[0][0] * grad[0], self.module_input[0][1] * grad[1])
+
+
+class einsum(RelDeepTaylor):
+    def forward(self, equation, *operands):
+        return torch.einsum(equation, *operands)
+
+class SoftMax(torch.nn.modules.activation.Softmax):
+    def __init__(self, dim: Optional[int]) -> None:
+        super().__init__(dim=dim)
+        self.register_backward_hook(backward_hook)
+
+class Sequential(torch.nn.Sequential):
+    def relevance_propagation(self, prev_rel, **kwargs):
+        rel = prev_rel
+        for module in reversed(self._modules.values()):
+            try:
+                rel = module.relevance_propagation(rel, **kwargs)
+            except AttributeError:
+                pass
+        return rel
+# Main layers with custom implementation of relvance propagation,
+# that is not just naïve DTD
 class Linear(torch.nn.Linear, Rel):
     # Epsilon-rule
-    def relevance_propagation(self, prev_rel):
+    def relevance_propagation(self, prev_rel, **kwargs):
         module_output = self.forward(self.module_input)
-        frac = divide_add_epsilon(module_output, prev_rel)
+        frac = divide_add_epsilon(prev_rel, module_output)
         frac_times_grad = frac @ self.weight
         return self.module_input * frac_times_grad
 
-class MatMul(Rel):
+    # Alpha-Beta: Pancho and Daniel
+    # def relevance_propagation(self, prev_rel, alpha=1):
+    #     pw = torch.clamp(self.weight, min=0)
+    #     nw = torch.clamp(self.weight, max=0)
+    #     px = torch.clamp(self.module_input, min=0)
+    #     nx = torch.clamp(self.module_input, max=0)
+
+    #     Z1 = F.linear(px, pw)
+    #     Z2 = F.linear(nx, nw)
+    #     S = divide_add_epsilon(prev_rel, Z1 + Z2)
+    #     C1 = S @ pw
+    #     C2 = S @ nw
+
+    #     return px * C1 + nx * C2
+
+class MatMul(RelDeepTaylor):
     def forward(self, inputs):
         return torch.matmul(*inputs)
     # Epsilon rule
-    def relevance_propagation(self, prev_rel):
-        X, Y = self.module_input
-        module_output = self.forward(X, Y)
-        frac = divide_add_epsilon(prev_rel, module_output)
-        # Gradient of output w.r.t. X = Y
-        grad_X = Y
-        # Gradient of output w.r.t. Y = X
-        grad_Y = X
-        # Divide by two gotten from https://arxiv.org/pdf/1904.00605.pdf
-        return (X * (grad_X @ frac) / 2, Y * (grad_Y @ frac) / 2 )
+    # def relevance_propagation(self, prev_rel, alpha=1):
+    #     X, Y = self.module_input
+    #     module_output = self.forward((X, Y))
+    #     frac = divide_add_epsilon(prev_rel, module_output)
+    #     # Gradient of output w.r.t. X = Y
+    #     grad_X = Y
+    #     # Gradient of output w.r.t. Y = X
+    #     grad_Y = X
+    #     # Divide by two gotten from https://arxiv.org/pdf/1904.00605.pdf
+    #     return (X * (grad_X @ frac) / 2, Y * (grad_Y @ frac) / 2 )
 
-
-class Softmax(torch.nn.Softmax, Rel):
-    pass
-
-class einsum(Rel):
-    def forward(self, equation, *operands):
-        return torch.einsum(equation, *operands)
+class Mul(RelDeepTaylor):
+    def forward(self, inputs):
+        return torch.mul(*inputs)
 
 class Add(RelEpsilon):
     
@@ -179,21 +252,31 @@ class Add(RelEpsilon):
 
     def forward(self, inputs):
         return torch.add(*inputs)
-    
-    
 
-    def relevance_propagation(self, prev_rel, renormalize=True):
+    def relevance_propagation(self, prev_rel, renormalize=True, alpha=1):
         X, Y = self.module_input
         module_output = self.forward(self.module_input)
-        frac = divide_add_epsilon(prev_rel, output)
+        frac = divide_add_epsilon(prev_rel, module_output)
         grad = torch.autograd.grad(module_output, self.module_input, frac, retain_graph=True) # Remove if not debugging
         grad_X_times_frac = torch.ones(X.shape) * frac
+        if not grad_X_times_frac.shape == X.shape:
+            dims = []
+            for i in range(X.dim()):
+                if X.shape[i] < grad_X_times_frac.shape[i]:
+                    dims.append(i)
+            grad_X_times_frac = torch.sum(grad_X_times_frac, dim=dims, keepdim=True)
         grad_Y_times_frac = torch.ones(Y.shape) * frac
+        if not grad_Y_times_frac.shape == Y.shape:
+            dims = []
+            for i in range(Y.dim()):
+                if Y.shape[i] < grad_Y_times_frac.shape[i]:
+                    dims.append(i)
+            grad_Y_times_frac = torch.sum(grad_Y_times_frac, dim=dims, keepdim=True)
         assert (grad[0] == grad_X_times_frac).all()
         assert (grad[1] == grad_Y_times_frac).all()
 
         rel_X = X * grad_X_times_frac
-        rel_Y = X * grad_Y_times_frac
+        rel_Y = Y * grad_Y_times_frac
         if not renormalize:
             return (rel_X, rel_Y)
         
@@ -231,11 +314,4 @@ if __name__ == "__main__":
     one_hot[:, 0] = 1
     rel = module.relevance_propagation(one_hot)
 
-    module = hila_layers.Add()
-    input1 = torch.tensor([[1.0,2.0,4.0,5.0,1.0,2.0,4.0,5.0,1.0,2.0,4.0,5.0,1.0,2.0,4.0,5.0],[4,3,2,9,4,3,2,9,4,3,2,9,4,3,2,9]], requires_grad=True)
-    input2 = torch.tensor([[9.0,9.0,9.0,9.0,1.0,2.0,4.0,5.0,1.0,2.0,4.0,5.0,1.0,2.0,4.0,5.0],[1,1,1,1,1,1,1,1,4,3,2,9,4,3,2,9]], requires_grad=True)
-    output = module((input1, input2))
-    one_hot = torch.zeros(input1.shape)
-    one_hot[:, 0] = 1
-    hila_rel = module.relprop(one_hot, alpha=1)
     print("Done!")
