@@ -171,7 +171,9 @@ class BertModel(BertPreTrainedModel):
     
     def relevance_propagation(self, prev_rel, **kwargs):
         rel = self.pooler.relevance_propagation(prev_rel, **kwargs)
+        assert torch.isclose(rel.sum(), torch.tensor(1).float())
         rel = self.encoder.relevance_propagation(rel, **kwargs)
+        assert torch.isclose(rel.sum(), torch.tensor(1).float())
         return rel
 
 class BertPooler(torch.nn.Module):
@@ -412,9 +414,12 @@ class BertAttention(torch.nn.Module):
         return outputs
     
     def relevance_propagation(self, prev_rel, **kwargs):
-        rel = self.output.relevance_propagation(prev_rel, **kwargs)
+        (rel, rel_residual) = self.output.relevance_propagation(prev_rel, **kwargs)
+        assert torch.isclose(rel.sum() + rel_residual.sum(), torch.tensor(1).float())
         # self.self is for SelfAttention, weird naming scheme but whatever
-        rel = self.self.relevance_propagation(prev_rel, **kwargs)
+        rel = self.self.relevance_propagation(rel, **kwargs)
+        rel = self.clone.relevance_propagation((rel, rel_residual), **kwargs)
+        assert torch.isclose(rel.sum(), torch.tensor(1).float())
         return rel
 
 class BertSelfAttention(torch.nn.Module):
@@ -605,7 +610,7 @@ class BertSelfOutput(torch.nn.Module):
         return hidden_states
     def relevance_propagation(self, prev_rel, **kwargs):
         (rel, rel_residual) = self.skip.relevance_propagation(prev_rel, **kwargs)
-        rel = self.dense.relevance_propagation(prev_rel, **kwargs)
+        rel = self.dense.relevance_propagation(rel, **kwargs)
         return (rel, rel_residual)
         
 
@@ -831,7 +836,9 @@ class BertForSequenceClassification(BertPreTrainedModel):
         )
     def relevance_propagation(self, prev_rel, **kwargs):
         rel = self.classifier.relevance_propagation(prev_rel, **kwargs)
+        assert torch.isclose(rel.sum(), torch.tensor(1).float())
         rel = self.bert.relevance_propagation(rel, **kwargs)
+        assert torch.isclose(rel.sum(), torch.tensor(1).float())
         return rel
 
 

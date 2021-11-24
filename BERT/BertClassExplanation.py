@@ -1,3 +1,4 @@
+from torch.nn.functional import one_hot
 from custom_bert import BertForSequenceClassification
 import torch
 from captum.attr import visualization
@@ -25,25 +26,31 @@ class BertForSequenceClassificationExplanator:
         output = self.bert_model(**input)
         logits = output.logits.reshape(input["input_ids"].shape[0], self.bert_model.config.num_labels)
         normalized_class_score = torch.nn.functional.softmax(logits, dim=1)
-        one_hot_preds = torch.argmax(normalized_class_score, dim=1).float().requires_grad_(True)
+        preds = torch.argmax(normalized_class_score, dim=1).float().requires_grad_(True)
 
         self.bert_model.zero_grad()
-        one_hot_preds.backward(retain_graph=True)
+        logits.backward(retain_graph=True)
+        one_hot_preds = torch.zeros((preds.shape[0], self.bert_model.config.num_labels))
+        one_hot_preds[:, preds.long()] = 1
         kwargs = {"alpha": 1}
         self.bert_model.relevance_propagation(one_hot_preds.to(input["input_ids"].device), **kwargs)
         relevances = []
+        rel_prod = None
         for attention_block in self.bert_model.bert.encoder.layer:
             rel = attention_block.attention.self.attention_relevance.clamp(min=0).mean(dim=1)
-            relevances.append(rel.double())
-            # rel = torch.eye(rel.shape[1]) + rel
-            # if final_rel is None:
-            #     final_rel = rel
-            # else:
-            #     final_rel = (final_rel * rel).double().clamp(max=1e100)
-            # assert not torch.isnan(final_rel).any()
+            relevances.append(rel)
+            rel = torch.eye(rel.shape[1]) + rel
+            if rel_prod is None:
+                rel_prod = rel
+            else:
+                rel_prod = torch.bmm(rel_prod, rel)
+            assert not torch.isnan(rel_prod).any()
         final_rel = self.compute_rollout_attention(relevances)
         final_rel[:, 0, 0] = 0
-        return final_rel[:, 0], normalized_class_score
+        rel_prod[:, 0, 0] = 0
+        # return final_rel[:, 0], normalized_class_score
+        assert torch.isclose(final_rel, rel_prod, atol=1e-4).all()
+        return rel_prod[:, 0], normalized_class_score
 
     def vizualize(self, explanations, tokens, pred_prob, true_class):
         for i in range(explanations.shape[0]):

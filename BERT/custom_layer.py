@@ -205,41 +205,54 @@ class Sequential(torch.nn.Sequential):
 # that is not just naïve DTD
 class Linear(torch.nn.Linear, Rel):
     # Epsilon-rule
-    def relevance_propagation(self, prev_rel, **kwargs):
-        module_output = self.forward(self.module_input)
-        frac = divide_add_epsilon(prev_rel, module_output)
-        frac_times_grad = frac @ self.weight
-        return self.module_input * frac_times_grad
+    # def relevance_propagation(self, prev_rel, **kwargs):
+    #     module_output = self.forward(self.module_input)
+    #     frac = divide_add_epsilon(prev_rel, module_output)
+    #     frac_times_grad = frac @ self.weight
+    #     return self.module_input * frac_times_grad
 
     # Alpha-Beta: Pancho and Daniel
-    # def relevance_propagation(self, prev_rel, alpha=1):
-    #     pw = torch.clamp(self.weight, min=0)
-    #     nw = torch.clamp(self.weight, max=0)
-    #     px = torch.clamp(self.module_input, min=0)
-    #     nx = torch.clamp(self.module_input, max=0)
+    def relevance_propagation(self, prev_rel, alpha=1):
+        pw = torch.clamp(self.weight, min=0)
+        nw = torch.clamp(self.weight, max=0)
+        px = torch.clamp(self.module_input, min=0)
+        nx = torch.clamp(self.module_input, max=0)
 
-    #     Z1 = F.linear(px, pw)
-    #     Z2 = F.linear(nx, nw)
-    #     S = divide_add_epsilon(prev_rel, Z1 + Z2)
-    #     C1 = S @ pw
-    #     C2 = S @ nw
+        Z1 = F.linear(px, pw)
+        Z2 = F.linear(nx, nw)
+        S = divide_add_epsilon(prev_rel, Z1 + Z2)
+        C1 = S @ pw
+        C2 = S @ nw
 
-    #     return px * C1 + nx * C2
+        return px * C1 + nx * C2
 
-class MatMul(RelDeepTaylor):
+class MatMul(Rel):
     def forward(self, inputs):
         return torch.matmul(*inputs)
     # Epsilon rule
-    # def relevance_propagation(self, prev_rel, alpha=1):
-    #     X, Y = self.module_input
-    #     module_output = self.forward((X, Y))
+    def relevance_propagation(self, prev_rel, alpha=1):
+        X, Y = self.module_input
+        module_output = self.forward((X, Y))
+        frac = divide_add_epsilon(prev_rel, module_output)
+        # Gradient of output w.r.t. X = Y
+        grad_X = Y
+        # Gradient of output w.r.t. Y = X
+        grad_Y = X
+        grad = torch.autograd.grad(module_output, self.module_input, frac, retain_graph=True)
+        # Divide by two gotten from https://arxiv.org/pdf/1904.00605.pdf
+        # return (X * torch.matmul(grad_X * frac) / 2, Y * (torch.matmul(grad_Y, frac)) / 2 )
+        return (X * grad[0]) / 2, (Y * grad[1]) / 2
+
+    # Pancho and Daniel epsilon-rule
+    # def relevance_propagation(self, prev_rel, **kwargs):
+    #     Q = self.module_input[0]
+    #     K = self.module_input[1]
+
+    #     module_output = self.forward(self.module_input)
     #     frac = divide_add_epsilon(prev_rel, module_output)
-    #     # Gradient of output w.r.t. X = Y
-    #     grad_X = Y
-    #     # Gradient of output w.r.t. Y = X
-    #     grad_Y = X
-    #     # Divide by two gotten from https://arxiv.org/pdf/1904.00605.pdf
-    #     return (X * (grad_X @ frac) / 2, Y * (grad_Y @ frac) / 2 )
+    #     C1 = frac @ K
+    #     C2 = frac.permute(0,1,3,2) @ Q  # S is (1, 12, 197, 197). Need to transpose last 2 dims when mutliplying by Q
+    #     return [Q * C1, K * C2]
 
 class Mul(RelDeepTaylor):
     def forward(self, inputs):
