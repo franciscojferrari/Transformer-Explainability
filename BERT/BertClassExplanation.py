@@ -29,7 +29,7 @@ class BertForSequenceClassificationExplanator:
         preds = torch.argmax(normalized_class_score, dim=1).float().requires_grad_(True)
 
         self.bert_model.zero_grad()
-        logits.backward(retain_graph=True)
+        preds.backward(retain_graph=True)
         one_hot_preds = torch.zeros((preds.shape[0], self.bert_model.config.num_labels))
         one_hot_preds[:, preds.long()] = 1
         kwargs = {"alpha": 1}
@@ -40,6 +40,7 @@ class BertForSequenceClassificationExplanator:
             rel = attention_block.attention.self.attention_relevance.clamp(min=0).mean(dim=1)
             relevances.append(rel)
             rel = torch.eye(rel.shape[1]) + rel
+            rel = (rel / rel.sum(dim=-1, keepdim=True).clamp(min=1e-9)).clamp(max=1e20)
             if rel_prod is None:
                 rel_prod = rel
             else:
