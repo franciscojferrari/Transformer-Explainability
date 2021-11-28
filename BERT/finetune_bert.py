@@ -72,18 +72,19 @@ if __name__ == "__main__":
         except FileExistsError:
             pass
         # Fix loading and preprocess dataset
-        train_dataset, val_dataset = load_dataset("imdb", split=['train[:90%]', 'train[90%:]'])
+        train_dataset, val_dataset = load_dataset("movie_rationales", split=['train', 'validation'])
         model_config = BertConfig.from_json_file(args.bert_params)
         tokenizer = AutoTokenizer.from_pretrained(model_config.bert_vocab)
         def tokenize_function(examples):
-            return tokenizer(examples["text"], padding="max_length", truncation=True)
+            return tokenizer(examples["review"], padding="max_length", truncation=True)
         train_dataset = train_dataset.map(tokenize_function, batched=True)
         val_dataset = val_dataset.map(tokenize_function, batched=True)
 
-        train_dataset = train_dataset.remove_columns(["text"])
+        # train_dataset.reomve_columns("review")
+        train_dataset = train_dataset.remove_columns(["evidences", "review"])
         train_dataset = train_dataset.rename_column("label", "labels")
         train_dataset.set_format("torch")
-        val_dataset = val_dataset.remove_columns(["text"])
+        val_dataset = val_dataset.remove_columns(["evidences", "review"])
         val_dataset = val_dataset.rename_column("label", "labels")
         val_dataset.set_format("torch")
 
@@ -112,11 +113,10 @@ if __name__ == "__main__":
     else:
         if args.pytorch_lightning_checkpoint_path is None:
             parser.error("If not training, you have to specify a checkpoint to test the model from.")
-        eval_dataset = load_dataset("imdb", split=['test'])
+        eval_dataset = load_dataset("movie_rationales", split=['test'])
         def tokenize_function(examples):
-            return tokenizer(examples["text"], padding="max_length", truncation=True)
+            return tokenizer(examples["review"], padding="max_length", truncation=True)
         eval_dataset = eval_dataset.map(tokenize_function, batched=True)
-        eval_dataset = eval_dataset.remove_columns(["text"])
         eval_dataset = eval_dataset.rename_column("label", "labels")
         eval_dataset.set_format("torch")
         eval_dataloader = DataLoader(eval_dataset, batch_size=32)
