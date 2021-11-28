@@ -6,6 +6,12 @@ from torch.nn import functional as F
 from torch.nn import modules
 
 def divide_add_epsilon(num, den, epsilon=1e-9):
+    if num.numel() == den.numel():
+        view = num.shape if num.dim() > den.dim() else den.shape
+        # Add epsilon to denominator
+        den_eps = den + epsilon
+        # Where denominator == -epsilon, add 2*epsilon instead
+        return num.view(view) / torch.where(den_eps == 0, torch.tensor(epsilon), den_eps).view(view)
     # Add epsilon to denominator
     den_eps = den + epsilon
     # Where denominator == -epsilon, add 2*epsilon instead
@@ -224,7 +230,8 @@ class Linear(torch.nn.Linear, Rel):
         C1 = S @ pw
         C2 = S @ nw
 
-        return px * C1 + nx * C2
+        rel = px * C1 + nx * C2
+        return rel
 
 class MatMul(Rel):
     def forward(self, inputs):
@@ -302,13 +309,17 @@ class Add(RelEpsilon):
         # rel_X_re = rel_X * divide_add_epsilon(X_frac.T, rel_X_sum).unsqueeze(1)
         # rel_Y_re = rel_Y * divide_add_epsilon(Y_frac.T, rel_Y_sum).unsqueeze(1)
 
-        rel_X_sum = rel_X.sum()
-        rel_Y_sum = rel_Y.sum()
+        rel_X_sum = rel_X.sum(dim=list(range(1, rel_X.dim())))
+        rel_Y_sum = rel_Y.sum(dim=list(range(1, rel_Y.dim())))
 
-        X_frac = divide_add_epsilon(rel_X_sum.abs(), rel_X_sum.abs() + rel_Y_sum.abs()) * prev_rel.sum()
-        Y_frac = divide_add_epsilon(rel_Y_sum.abs(), rel_X_sum.abs() + rel_Y_sum.abs()) * prev_rel.sum()
-        rel_X_re = rel_X * divide_add_epsilon(X_frac, rel_X_sum)
-        rel_Y_re = rel_Y * divide_add_epsilon(Y_frac, rel_Y_sum)
+        X_frac = divide_add_epsilon(rel_X_sum.abs(), rel_X_sum.abs() + rel_Y_sum.abs()) * prev_rel.sum(dim=list(range(1, prev_rel.dim())))
+        Y_frac = divide_add_epsilon(rel_Y_sum.abs(), rel_X_sum.abs() + rel_Y_sum.abs()) * prev_rel.sum(dim=list(range(1, prev_rel.dim())))
+        view = ([1,] * (rel_X.dim()-1))
+        view.insert(0, prev_rel.shape[0])
+        rel_X_re = rel_X * divide_add_epsilon(X_frac, rel_X_sum).view(view)
+        view = ([1,] * (rel_Y.dim()-1))
+        view.insert(0, prev_rel.shape[0])
+        rel_Y_re = rel_Y * divide_add_epsilon(Y_frac, rel_Y_sum).view(view)
         return (rel_X_re, rel_Y_re)
 
 if __name__ == "__main__":

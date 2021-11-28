@@ -6,6 +6,7 @@ from captum.attr import visualization
 class BertForSequenceClassificationExplanator:
     def __init__(self, bert_model: BertForSequenceClassification) -> None:
         self.bert_model = bert_model
+        self.bert_model.eval()
 
     def compute_rollout_attention(self, all_layer_matrices, start_layer=0):
         # adding residual consideration
@@ -25,49 +26,41 @@ class BertForSequenceClassificationExplanator:
     def generate_explanation(self, **input):
         output = self.bert_model(**input)
         logits = output.logits.reshape(input["input_ids"].shape[0], self.bert_model.config.num_labels)
-        normalized_class_score = torch.nn.functional.softmax(logits, dim=1)
-        preds = torch.argmax(normalized_class_score, dim=1).float().requires_grad_(True)
+        one_hot = torch.nn.functional.one_hot(torch.argmax(logits, dim=1))
 
         self.bert_model.zero_grad()
-        preds.backward(retain_graph=True)
-        one_hot_preds = torch.zeros((preds.shape[0], self.bert_model.config.num_labels))
-        one_hot_preds[:, preds.long()] = 1
+        (one_hot * logits).sum().backward(retain_graph=True)
         kwargs = {"alpha": 1}
-        self.bert_model.relevance_propagation(one_hot_preds.to(input["input_ids"].device), **kwargs)
-        relevances = []
-        rel_prod = None
+        self.bert_model.relevance_propagation(one_hot.to(input["input_ids"].device), **kwargs)
+        weighted_attention_relevance = None
         for attention_block in self.bert_model.bert.encoder.layer:
-            rel = attention_block.attention.self.attention_relevance.clamp(min=0).mean(dim=1)
-            relevances.append(rel)
-            rel = torch.eye(rel.shape[1]) + rel
-            rel = (rel / rel.sum(dim=-1, keepdim=True).clamp(min=1e-9)).clamp(max=1e20)
-            if rel_prod is None:
-                rel_prod = rel
+            rel = attention_block.attention.self.attention_relevance
+            rel_grad = attention_block.attention.self.attention_grad
+            weighted_layer_attention_relevance = torch.eye(rel.shape[-1]) + (rel_grad * rel).clamp(min=0).mean(dim=1)
+            if weighted_attention_relevance is None:
+                weighted_attention_relevance = weighted_layer_attention_relevance.double()
             else:
-                rel_prod = torch.bmm(rel_prod, rel)
-            assert not torch.isnan(rel_prod).any()
-        final_rel = self.compute_rollout_attention(relevances)
-        final_rel[:, 0, 0] = 0
-        rel_prod[:, 0, 0] = 0
-        # return final_rel[:, 0], normalized_class_score
-        assert torch.isclose(final_rel, rel_prod, atol=1e-4).all()
-        return rel_prod[:, 0], normalized_class_score
+                weighted_attention_relevance = torch.bmm(weighted_attention_relevance, weighted_layer_attention_relevance.double())
+            assert not torch.isnan(weighted_attention_relevance).any()
+        weighted_attention_relevance[:, 0, 0] = 0
+        return weighted_attention_relevance[:, 0], one_hot
 
-    def vizualize(self, explanations, tokens, pred_prob, true_class):
+    def vizualize(self, explanations, tokens, pred, label, label_string, label_being_explained=1):
         for i in range(explanations.shape[0]):
-            for j in range(1, len(tokens)):
-                if not(tokens[j] == "[PAD]") and not(tokens[j] == "[CLS]"):
-                    print((tokens[j], explanations[i, j].item()))
+            # for j in range(0, explanations.shape[1]):
+            #     if not(tokens[j] == "[PAD]") and not(tokens[j] == "[CLS]"):
+            #         print((tokens[j], explanations[i, j].item()))
             vis_data_records = [visualization.VisualizationDataRecord(
-                                            explanations.tolist(),
-                                            torch.argmax(pred_prob, dim=1).tolist(),
-                                            true_class,
-                                            true_class,
-                                            true_class,
-                                            1,       
-                                            tokens,
+                                            explanations[i, :len(tokens)].detach().numpy(),
+                                            pred[i].item(),
+                                            label_string[pred[i].item()],
+                                            label_string[label[i].item()],
+                                            label_string[label_being_explained],
+                                            explanations[i].sum(),       
+                                            tokens[i],
                                             1)]
             visualization.visualize_text(vis_data_records)
+            
         pass
 
 if __name__ == "__main__":
@@ -77,15 +70,17 @@ if __name__ == "__main__":
     tokenizer = AutoTokenizer.from_pretrained(huggingface_model_name)
 
     inputs = tokenizer(
-        "This movie was the best movie I have ever seen! some scenes were ridiculous, but acting was great.", 
+        ["This movie was the best movie I have ever seen! some scenes were ridiculous, but acting was great.",
+        "Pretty gud moive",
+        "This movie is utter shit"], 
         return_tensors="pt", padding="max_length", truncation=True)
-    tokens = tokenizer.convert_ids_to_tokens(inputs["input_ids"].flatten())
+    tokens = [tokenizer.convert_ids_to_tokens(inputs["input_ids"][i]) for i in range(inputs["input_ids"].shape[0])]
 
     model = BertForSequenceClassification.from_pretrained(huggingface_model_name, num_labels=2)
     print("Using activation func: ", model.config.hidden_act)
     explanator = BertForSequenceClassificationExplanator(model)
-    exp, pred_prob = explanator.generate_explanation(**inputs)
-    explanator.vizualize(exp, tokens, pred_prob, 1)
+    exp, pred = explanator.generate_explanation(**inputs)
+    explanator.vizualize(exp, tokens, torch.argmax(pred,dim=1), torch.tensor([1, 1, 0]), ["NEG", "POS"])
     # outputs = model(**inputs)
     # class_score = torch.nn.functional.softmax(outputs.logits, dim=1)
     # class_preds = torch.argmax(class_score, dim=1)

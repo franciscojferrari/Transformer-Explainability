@@ -171,9 +171,9 @@ class BertModel(BertPreTrainedModel):
     
     def relevance_propagation(self, prev_rel, **kwargs):
         rel = self.pooler.relevance_propagation(prev_rel, **kwargs)
-        assert torch.isclose(rel.sum(), torch.tensor(1).float())
+        assert torch.isclose(rel.sum(dim=list(range(1, rel.dim()))), torch.ones(rel.shape[0]).float()).all()
         rel = self.encoder.relevance_propagation(rel, **kwargs)
-        assert torch.isclose(rel.sum(), torch.tensor(1).float())
+        assert torch.isclose(rel.sum(dim=list(range(1, rel.dim()))), torch.ones(rel.shape[0]).float()).all()
         return rel
 
 class BertPooler(torch.nn.Module):
@@ -415,11 +415,11 @@ class BertAttention(torch.nn.Module):
     
     def relevance_propagation(self, prev_rel, **kwargs):
         (rel, rel_residual) = self.output.relevance_propagation(prev_rel, **kwargs)
-        assert torch.isclose(rel.sum() + rel_residual.sum(), torch.tensor(1).float())
+        assert torch.isclose(rel.sum(dim=list(range(1, rel.dim()))) + rel_residual.sum(dim=list(range(1, rel_residual.dim()))), torch.ones(rel.shape[0]).float()).all()
         # self.self is for SelfAttention, weird naming scheme but whatever
         rel = self.self.relevance_propagation(rel, **kwargs)
         rel = self.clone.relevance_propagation((rel, rel_residual), **kwargs)
-        assert torch.isclose(rel.sum(), torch.tensor(1).float())
+        assert torch.isclose(rel.sum(dim=list(range(1, rel.dim()))), torch.ones(rel.shape[0]).float()).all()
         return rel
 
 class BertSelfAttention(torch.nn.Module):
@@ -547,7 +547,10 @@ class BertSelfAttention(torch.nn.Module):
         # Normalize the attention scores to probabilities.
         # SANDORNOTE: This is the what we want to get the relevance of (post-softmax)
         attention_probs = F.softmax(attention_scores, dim=-1).requires_grad_(True)
-        # attention_probs.register_hook(self.save_attention_grad) # This seems to be pointless
+        attention_probs.register_hook(self.save_attention_grad)
+        attention_probs.requires_grad_(True)
+        attention_probs.retain_grad()
+        self.attention_probs = attention_probs
         # This is actually dropping out entire tokens to attend to, which might
         # seem a bit unusual, but is taken from the original Transformer paper.
         attention_probs = self.dropout(attention_probs)
@@ -836,9 +839,9 @@ class BertForSequenceClassification(BertPreTrainedModel):
         )
     def relevance_propagation(self, prev_rel, **kwargs):
         rel = self.classifier.relevance_propagation(prev_rel, **kwargs)
-        assert torch.isclose(rel.sum(), torch.tensor(1).float())
+        assert torch.isclose(rel.sum(dim=list(range(1, rel.dim()))), torch.ones(rel.shape[0]).float()).all()
         rel = self.bert.relevance_propagation(rel, **kwargs)
-        assert torch.isclose(rel.sum(), torch.tensor(1).float())
+        assert torch.isclose(rel.sum(dim=list(range(1, rel.dim()))), torch.ones(rel.shape[0]).float()).all()
         return rel
 
 
