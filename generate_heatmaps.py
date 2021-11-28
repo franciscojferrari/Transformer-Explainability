@@ -94,7 +94,7 @@ def compute_saliency_and_save(images, path, lrp, device):
             index = None
 
             Res = lrp.generate_LRP(
-                data, start_layer=1, index=index, device=device
+                data, start_layer=1, method="grad", index=index, device=device
             ).reshape(data.shape[0], 1, 14, 14,)
 
             Res = torch.nn.functional.interpolate(Res, scale_factor=16, mode='bilinear').to(device)
