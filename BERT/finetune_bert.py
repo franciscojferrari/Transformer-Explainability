@@ -4,7 +4,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, random_split
 import pytorch_lightning as pl
-from torchmetrics import Accuracy
+from torchmetrics import Accuracy, F1
 from transformers import PretrainedConfig, AutoTokenizer, get_scheduler, AdamW
 from transformers.models.bert.configuration_bert import BertConfig
 from datasets import load_dataset, load_metric
@@ -20,6 +20,7 @@ class BertSequenceClassificationSystem(pl.LightningModule):
             self.bert_classifier = BertForSequenceClassification.from_pretrained(huggingface_model_name, config=config)
         self.bert_classifier.train()
         self.acc = Accuracy()
+        self.f1 = F1()
 
     def forward(self, x):
         y = self.bert_classifier(**x)
@@ -27,16 +28,21 @@ class BertSequenceClassificationSystem(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         y = self.bert_classifier(**batch)
+        logits = y.logits
         self.log("train_loss", y.loss)
-        self.log("train_accuracy", self.acc(torch.argmax(F.softmax(y.logits, dim=1), dim=1)), batch["labels"])
+        if y.logits.dim()-1 != batch["labels"].dim():
+            logits = logits.squeeze(1)
+            self.log("train_f1", self.f1(y.logits,  batch["labels"]))
+            self.log("train_accuracy", self.acc(torch.argmax(F.softmax(y.logits, dim=1), dim=1)), batch["labels"])
         return y.loss
 
     def validation_step(self, val_batch, val_batch_idx):
         y = self.bert_classifier(**val_batch)
         logits = y.logits
         self.log("val_loss", y.loss)
-        if y.logits.dim() != val_batch["labels"]:
+        if y.logits.dim()-1 != val_batch["labels"].dim():
             logits = logits.squeeze(1)
+        self.log("train_f1", self.f1(logits,  val_batch["labels"]))
         self.log("val_accuracy", self.acc(torch.argmax(F.softmax(logits, dim=1), dim=1), val_batch["labels"]))
 
     def configure_optimizers(self):
