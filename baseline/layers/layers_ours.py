@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import pdb
 
-__all__ = ['forward_hook', 'Add', 'ReLU', 'GELU', 'Dropout', 
+__all__ = ['forward_hook', 'Add', 'ReLU', 'GELU', 'Dropout',
            'Linear', 'Conv2d',
            'safe_divide', 'Softmax', 'IndexSelect', 'LayerNorm', 'MatMul1', 'MatMul2']
 
@@ -71,7 +71,7 @@ class Add(RelProp):
     def relprop(self, R, alpha):
         # CHECKED: equivalent as their implementation
         Z = self.forward(self.X)
-        S = safe_divide(R, Z)        
+        S = safe_divide(R, Z)
         a = self.X[0] * S
         b = self.X[1] * S
 
@@ -89,19 +89,19 @@ class Add(RelProp):
 
 
 class IndexSelect(RelProp):
-    # This function is used to select the relevance of only the token 0, which is the input to the MLP. 
+    # This function is used to select the relevance of only the token 0, which is the input to the MLP.
     def forward(self, inputs, dim, indices):
         self.__setattr__('dim', dim)
         self.__setattr__('indices', indices)
 
         return torch.index_select(inputs, dim, indices)
 
-    def relprop(self, R, alpha):
+    def relprop(self, R, alpha, device):
         # CHECKED. Same as original implementation
         # We get R from the classification head, which is connected to final token 0
         # We have to expand the relevance R to acount for all 197 tokens, and init R as 0 for the rest of the tokens
-        R_new = torch.zeros((1, 197, 768))
-        R_new[:,0,:] = R
+        R_new = torch.zeros((1, 197, 768)).to(device)
+        R_new[:, 0, :] = R
         return R_new
 
 
@@ -135,7 +135,7 @@ class Linear(nn.Linear, RelProp):
 
 
 class MatMul1(RelProp):
-    # Inheriting from RelProp we get the forward hook that sets self.X = [q, k]     
+    # Inheriting from RelProp we get the forward hook that sets self.X = [q, k]
     def relprop(self, R):
         '''
         LRP_eps for matrix multiplication
@@ -148,13 +148,15 @@ class MatMul1(RelProp):
         Z = self.forward([Q, K])
         S = safe_divide(R, Z)
         C1 = S @ K
-        C2 = S.permute(0,1,3,2) @ Q  # S is (1, 12, 197, 197). Need to transpose last 2 dims when mutliplying by Q
+        # S is (1, 12, 197, 197). Need to transpose last 2 dims when mutliplying by Q
+        C2 = S.permute(0, 1, 3, 2) @ Q
         return [Q * C1, K * C2]
 
     def forward(self, X):
         # CHECKED: this is equivalent to the forward of matmul1 in original apper
         assert len(X) == 2
         return torch.einsum('bhid,bhjd->bhij', X[0], X[1])
+
 
 class MatMul2(RelProp):
     def relprop(self, R):
@@ -172,9 +174,9 @@ class MatMul2(RelProp):
         V = (1, 12, 197, 64) = (1, h, s, Dh)
         A = (1, 12, 197, 197) = (1, h, s, s)    
         '''
-        C1 = S @ V.permute(0,1,3,2)  # C1 = (1, 12, 197, 197)
-        C2 = S.permute(0,1,3,2) @ A  # C2 = (1, 12, 197, 64)
-        return [A * C1, V * C2.permute(0,1,3,2)]
+        C1 = S @ V.permute(0, 1, 3, 2)  # C1 = (1, 12, 197, 197)
+        C2 = S.permute(0, 1, 3, 2) @ A  # C2 = (1, 12, 197, 64)
+        return [A * C1, V * C2.permute(0, 1, 3, 2)]
 
     def forward(self, X):
         assert len(X) == 2

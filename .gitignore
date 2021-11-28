@@ -139,5 +139,5 @@ dmypy.json
 
 # JetBrains
 .idea/
-
+logs/*
 .DS_Store

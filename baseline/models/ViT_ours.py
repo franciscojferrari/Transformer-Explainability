@@ -9,7 +9,7 @@ from baseline.layers.layers_ours import *
 from baseline.layers.layers_paper import Clone, einsum  # imported for comparison purposes
 from baseline.layers.layer_helper import to_2tuple, trunc_normal_
 import torch.utils.model_zoo as model_zoo
-import pdb 
+import pdb
 
 _logger = logging.getLogger(__name__)
 
@@ -231,8 +231,9 @@ class Block(nn.Module):
         cam2 = self.mlp.relprop(cam2, **kwargs)
         cam2 = self.norm2.relprop(cam2, **kwargs)
         #cam = self.clone2.relprop((cam1, cam2), **kwargs)
-        cam = cam1 + cam2   # CHECKED: equivalent using clone. relprop is almost the same (but for some small differences due to numerical precision)
-                            # Also, we don't need a clone function bc we don't need to save X in the forward loop
+        # CHECKED: equivalent using clone. relprop is almost the same (but for some small differences due to numerical precision)
+        cam = cam1 + cam2
+        # Also, we don't need a clone function bc we don't need to save X in the forward loop
 
         (cam1, cam2) = self.add1.relprop(cam, **kwargs)
         cam2 = self.attn.relprop(cam2, **kwargs)
@@ -358,12 +359,12 @@ class VisionTransformer(nn.Module):
         return x
 
     def relprop(
-            self, cam=None, method="transformer_attribution", is_ablation=False, start_layer=0, **
-            kwargs):
+            self, cam=None, method="transformer_attribution", is_ablation=False, start_layer=0,
+            device='cuda', **kwargs):
         # print(kwargs)
         # print("conservation 1", cam.sum())
         cam = self.head.relprop(cam, **kwargs)
-        cam = self.pool.relprop(cam, **kwargs)
+        cam = self.pool.relprop(cam, device=device, **kwargs)
         cam = self.norm.relprop(cam, **kwargs)
         for blk in reversed(self.blocks):
             cam = blk.relprop(cam, **kwargs)
