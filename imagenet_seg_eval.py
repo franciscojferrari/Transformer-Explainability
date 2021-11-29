@@ -48,8 +48,11 @@ def eval_batch(image, labels, evaluator, index, device, lrp, results_dir, experi
 
     Res = lrp.generate_LRP(
         image.to(device),
-        start_layer=1, index=index, device=device).reshape(
-        args.batch_size, 1, 14, 14)
+        start_layer=1, 
+        index=index,
+        device=device,
+        method="transformer_attribution"
+    ).reshape(args.batch_size, 1, 14, 14)
 
     # threshold between FG and BG is the mean
     Res = (Res - Res.min()) / (Res.max() - Res.min())

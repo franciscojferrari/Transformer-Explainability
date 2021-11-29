@@ -107,8 +107,9 @@ def compute_saliency_and_save(images, path, lrp, device):
 def imagenet_dataloader(imagenet_validation_path: str, batch_size: int = 1):
     normalize = transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
     transform = transforms.Compose([
-        transforms.Resize(256),
-        transforms.CenterCrop(224),
+        # transforms.Resize(256),
+        # transforms.CenterCrop(224),
+        transforms.Resize(224),
         transforms.ToTensor(),
         normalize,
     ])
@@ -128,7 +129,7 @@ def imagenet_dataloader(imagenet_validation_path: str, batch_size: int = 1):
 @logger.timed
 def generate_perturbations(args):
     cuda = torch.cuda.is_available()
-    device = torch.device("cuda:2" if cuda else "cpu")
+    device = torch.device("cuda:1" if cuda else "cpu")
 
     if args.vit_model == "ours":
         logger.logger.debug("Using OUR ViT")

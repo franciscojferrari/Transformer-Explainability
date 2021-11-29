@@ -37,7 +37,8 @@ def eval(model, imagenet_ds, sample_loader, device, args):
         raise Exception('scale not valid')
 
     num_correct_pertub = np.zeros((9, len(imagenet_ds)))
-    dissimilarity_pertub = np.zeros((9, len(imagenet_ds)))
+    num_correct_pertub_original_prediction = np.zeros((9, len(imagenet_ds)))
+    # dissimilarity_pertub = np.zeros((9, len(imagenet_ds)))
     logit_diff_pertub = np.zeros((9, len(imagenet_ds)))
     prob_diff_pertub = np.zeros((9, len(imagenet_ds)))
     perturb_index = 0
@@ -49,10 +50,10 @@ def eval(model, imagenet_ds, sample_loader, device, args):
         data = data.to(device)
         vis = vis.to(device)
         target = target.to(device)
-        norm_data = normalize(data.clone())
+        # norm_data = normalize(data.clone())
 
         # Compute model accuracy
-        pred = model(norm_data)
+        pred = model(data)
         pred_probabilities = torch.softmax(pred, dim=1)
         pred_org_logit = pred.data.max(1, keepdim=True)[0].squeeze(1)
         pred_org_prob = pred_probabilities.data.max(1, keepdim=True)[0].squeeze(1)
@@ -92,9 +93,9 @@ def eval(model, imagenet_ds, sample_loader, device, args):
             _data = _data.scatter_(-1, idx, 0)
             _data = _data.reshape(*org_shape)
 
-            _norm_data = normalize(_data)
+            # _norm_data = normalize(_data)
 
-            out = model(_norm_data)
+            out = model(_data)
 
             pred_probabilities = torch.softmax(out, dim=1)
             pred_prob = pred_probabilities.data.max(1, keepdim=True)[0].squeeze(1)
@@ -107,13 +108,18 @@ def eval(model, imagenet_ds, sample_loader, device, args):
 
             target_class = out.data.max(1, keepdim=True)[1].squeeze(1)
             temp = (target == target_class).type(target.type()).data.cpu().numpy()
+            temp_orignal_prediction = (
+                pred_class == target_class).type(
+                target.type()).data.cpu().numpy()
             num_correct_pertub[i, perturb_index:perturb_index+len(temp)] = temp
+            num_correct_pertub_original_prediction[i, perturb_index:perturb_index+len(
+                temp_orignal_prediction)] = temp_orignal_prediction
 
-            probs_pertub = torch.softmax(out, dim=1)
-            target_probs = torch.gather(probs_pertub, 1, target[:, None])[:, 0]
-            second_probs = probs_pertub.data.topk(2, dim=1)[0][:, 1]
-            temp = torch.log(target_probs / second_probs).data.cpu().numpy()
-            dissimilarity_pertub[i, perturb_index:perturb_index+len(temp)] = temp
+            # probs_pertub = torch.softmax(out, dim=1)
+            # target_probs = torch.gather(probs_pertub, 1, target[:, None])[:, 0]
+            # second_probs = probs_pertub.data.topk(2, dim=1)[0][:, 1]
+            # temp = torch.log(target_probs / second_probs).data.cpu().numpy()
+            # dissimilarity_pertub[i, perturb_index:perturb_index+len(temp)] = temp
 
         model_index += len(target)
         perturb_index += len(target)
@@ -122,30 +128,41 @@ def eval(model, imagenet_ds, sample_loader, device, args):
     np.save(os.path.join(args.experiment_dir, 'model_dissimilarities.npy'), dissimilarity_model)
     np.save(os.path.join(args.experiment_dir, 'perturbations_hits.npy'),
             num_correct_pertub[:, :perturb_index])
-    np.save(os.path.join(args.experiment_dir, 'perturbations_dissimilarities.npy'),
-            dissimilarity_pertub[:, :perturb_index])
+
+    np.save(os.path.join(args.experiment_dir, 'perturbations_hits_original_prediction.npy'),
+            num_correct_pertub_original_prediction[:, :perturb_index])
+    # np.save(os.path.join(args.experiment_dir, 'perturbations_dissimilarities.npy'),
+    #         dissimilarity_pertub[:, :perturb_index])
     np.save(os.path.join(args.experiment_dir, 'perturbations_logit_diff.npy'),
             logit_diff_pertub[:, :perturb_index])
     np.save(os.path.join(args.experiment_dir, 'perturbations_prob_diff.npy'),
             prob_diff_pertub[:, :perturb_index])
 
-    print(np.mean(num_correct_model), np.std(num_correct_model))
-    print(np.mean(dissimilarity_model), np.std(dissimilarity_model))
-    print(perturbation_steps)
-    print(np.mean(num_correct_pertub, axis=1), np.std(num_correct_pertub, axis=1))
-    print(np.mean(dissimilarity_pertub, axis=1), np.std(dissimilarity_pertub, axis=1))
+    print("num_correct_model: ", np.mean(num_correct_model), np.std(num_correct_model))
+    print("dissimilarity_model: ", np.mean(dissimilarity_model), np.std(dissimilarity_model))
+    print("perturbation_steps: ", perturbation_steps)
+    print("num_correct_pertub: ", np.mean(num_correct_pertub, axis=1),
+          np.std(num_correct_pertub, axis=1))
+
+    print("num_correct_pertub_original_prediction: ", np.mean(
+        num_correct_pertub_original_prediction, axis=1),
+        np.std(num_correct_pertub_original_prediction, axis=1))
+    # print(np.mean(dissimilarity_pertub, axis=1), np.std(dissimilarity_pertub, axis=1))
 
 
 def pertturbation_eval(args):
     torch.multiprocessing.set_start_method('spawn')
 
     cuda = torch.cuda.is_available()
-    device = torch.device("cuda" if cuda else "cpu")
+    device = torch.device("cuda:2" if cuda else "cpu")
 
     imagenet_ds = ImagenetResults(args.vis_method_dir)
 
     # Model
-    model = our_vit_base_patch16_224().to(device)
+    if args.vit_model == "ours":
+        model = our_vit_base_patch16_224().to(device)
+    else:
+        model = paper_vit_base_patch16_224().to(device)
     model.eval()
 
     sample_loader = torch.utils.data.DataLoader(
