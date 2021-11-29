@@ -189,6 +189,7 @@ class Attention(nn.Module):
         #print('%d\t%d' % (torch.equal(cam_q, cam_q2), torch.equal(cam_k, cam_k2)))
         cam_q /= 2
         cam_k /= 2
+        # TODO: Experiment with normalizing with 1/3 given the signal split in to 3
 
         cam_qkv = rearrange(
             [cam_q, cam_k, cam_v],
