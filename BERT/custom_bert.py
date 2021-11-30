@@ -247,19 +247,19 @@ class BertEmbeddings(torch.nn.Module):
                 token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=self.position_ids.device)
 
         if inputs_embeds is None:
-            inputs_embeds = self.word_embeddings(input_ids)
-        token_type_embeddings = self.token_type_embeddings(token_type_ids)
+            inputs_embeds = self.word_embeddings(input_ids.long())
+        token_type_embeddings = self.token_type_embeddings(token_type_ids.long())
 
         embeddings = inputs_embeds + token_type_embeddings
         if self.position_embedding_type == "absolute":
-            position_embeddings = self.position_embeddings(position_ids)
+            position_embeddings = self.position_embeddings(position_ids.long())
             embeddings += position_embeddings
         embeddings = self.LayerNorm(embeddings)
         embeddings = self.dropout(embeddings)
         return embeddings
     
     def relevance_propagation(self, R):
-        pass
+        pass # SANDORFIX
 
 class BertEncoder(torch.nn.Module):
     def __init__(self, config):
@@ -804,6 +804,8 @@ class BertForSequenceClassification(BertPreTrainedModel):
 
         pooled_output = self.dropout(pooled_output)
         logits = self.classifier(pooled_output)
+        
+        logits = logits.squeeze(1)
 
         loss = None
         if labels is not None:
@@ -826,7 +828,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
             elif self.config.problem_type == "multi_label_classification":
                 loss_fct = BCEWithLogitsLoss()
-                loss = loss_fct(logits, labels)
+                loss = loss_fct(logits, torch.nn.functional.one_hot(labels.long(), self.num_labels).float())
         if not return_dict:
             output = (logits,) + outputs[2:]
             return ((loss,) + output) if loss is not None else output

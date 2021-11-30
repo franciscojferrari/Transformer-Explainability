@@ -11,10 +11,11 @@ class BertForSequenceClassificationExplanator:
     def generate_explanation(self, normalize_scores=True, **input):
         output = self.bert_model(**input)
         logits = output.logits.reshape(input["input_ids"].shape[0], self.bert_model.config.num_labels)
-        one_hot = torch.nn.functional.one_hot(torch.argmax(logits, dim=1))
+        one_hot = torch.nn.functional.one_hot(torch.argmax(logits, dim=1), self.bert_model.config.num_labels)
 
         self.bert_model.zero_grad()
-        (one_hot * logits).sum().backward(retain_graph=True)
+        backprop_me = (one_hot * logits).sum()
+        backprop_me.backward(retain_graph=True)
         kwargs = {"alpha": 1}
         self.bert_model.relevance_propagation(one_hot.to(input["input_ids"].device), **kwargs)
         weighted_attention_relevance = None
@@ -62,7 +63,6 @@ if __name__ == "__main__":
 
     inputs = tokenizer(
         ["This movie was the best movie I have ever seen! some scenes were ridiculous, but acting was great.",
-        "Pretty gud moive",
         "This movie is utter shit"], 
         return_tensors="pt", padding="max_length", truncation=True)
     # tokens = [tokenizer.convert_ids_to_tokens(inputs["input_ids"][i]) for i in range(inputs["input_ids"].shape[0])]
