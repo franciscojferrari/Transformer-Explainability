@@ -126,7 +126,7 @@ def imagenet_dataloader(imagenet_validation_path: str, batch_size: int = 1):
 
 
 @logger.timed
-def generate_perturbations(args):
+def generate_heatmaps(args):
     cuda = torch.cuda.is_available()
     device = torch.device("cuda:2" if cuda else "cpu")
 
@@ -223,6 +223,6 @@ if __name__ == "__main__":
 
     assert args.vit_model == "ours" or args.vit_model == "paper", "please select ours or paper"
 
-    generate_perturbations(args)
+    generate_heatmaps(args)
 
 # python generate_heatmaps.py --imagenet-validation-path /home/tf-exp-o-data/imgnet_val/ --save-path /home/tf-exp-o-data/results/ --vit-model ours
