@@ -139,6 +139,5 @@ lightning_logs/*
 .vscode/*
 BERT/RAP_layers.py
 BERT/BERT_checkpoints/*
-BERT/BERT_params/*
 BERT/hila_layers.py
 BERT/train_bert.py

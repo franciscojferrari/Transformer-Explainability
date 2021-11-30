@@ -1,6 +1,11 @@
 import torch
 from datasets import load_dataset
 from torchmetrics import F1
+from typing import Any, Callable, Dict, List, Set, Tuple
+from collections import Counter, defaultdict, namedtuple
+
+# What Hila Chefer does is that she takes _, indicies = expl.topk on the explnations,
+# then she sets start_token=indicies[i], end_token=indicies[i]+1
 
 class Rationale:
     ann_id: str
@@ -14,13 +19,13 @@ class Rationale:
             ret.append(Rationale(self.ann_id, self.docid, t, t+1))
         return ret
 
-    @classmethod
-    def from_annotation(cls, ann: Annotation) -> List['Rationale']:
-        ret = []
-        for ev_group in ann.evidences:
-            for ev in ev_group:
-                ret.append(Rationale(ann.annotation_id, ev.docid, ev.start_token, ev.end_token))
-        return ret
+    # @classmethod
+    # def from_annotation(cls, ann: Annotation) -> List['Rationale']:
+    #     ret = []
+    #     for ev_group in ann.evidences:
+    #         for ev in ev_group:
+    #             ret.append(Rationale(ann.annotation_id, ev.docid, ev.start_token, ev.end_token))
+    #     return ret
 
     @classmethod
     def from_instance(cls, inst: dict) -> List['Rationale']:
