@@ -61,7 +61,7 @@ class Mlp(nn.Module):
         out_features = out_features or in_features
         hidden_features = hidden_features or in_features
         self.fc1 = Linear(in_features, hidden_features)
-        self.act = GELU()
+        self.act = nn.GELU()
         self.fc2 = Linear(hidden_features, out_features)
         self.drop = Dropout(drop)
 
@@ -76,7 +76,7 @@ class Mlp(nn.Module):
     def relprop(self, cam, **kwargs):
         cam = self.drop.relprop(cam, **kwargs)
         cam = self.fc2.relprop(cam, use_eps_rule=False, **kwargs)
-        cam = self.act.relprop(cam, **kwargs)
+        # cam = self.act.relprop(cam, **kwargs)
         cam = self.fc1.relprop(cam, **kwargs)
         return cam
 
@@ -97,10 +97,10 @@ class Attention(nn.Module):
         self.matmul2_custom = MatMul2()
 
         self.qkv = Linear(dim, dim * 3, bias=qkv_bias)
-        self.attn_drop = Dropout(attn_drop)
+        self.attn_drop = nn.Dropout(attn_drop)  # Dropout(attn_drop)
         self.proj = Linear(dim, dim)
-        self.proj_drop = Dropout(proj_drop)
-        self.softmax = Softmax(dim=-1)
+        self.proj_drop = nn.Dropout(proj_drop)  # Dropout(proj_drop)
+        self.softmax = nn.Softmax(dim=-1)  # Softmax(dim=-1)
 
         self.attn_cam = None
         self.attn = None
@@ -163,7 +163,7 @@ class Attention(nn.Module):
         return out
 
     def relprop(self, cam, **kwargs):
-        cam = self.proj_drop.relprop(cam, **kwargs)
+        # cam = self.proj_drop.relprop(cam, **kwargs)
         cam = self.proj.relprop(cam, **kwargs)
         cam = rearrange(cam, 'b n (h d) -> b h n d', h=self.num_heads)
 
@@ -173,14 +173,16 @@ class Attention(nn.Module):
         (cam1, cam_v) = self.matmul2_custom.relprop(cam)
         #print('%d\t%d' % (torch.equal(cam1, cam1_2), torch.equal(cam_v, cam_v_2)))
 
-        cam1 /= 2
-        cam_v /= 2
+        # cam1 /= 2
+        # cam_v /= 2
+        cam1 = cam1 * 2/3
+        cam_v /= 3
 
         self.save_v_cam(cam_v)
         self.save_attn_cam(cam1)
 
-        cam1 = self.attn_drop.relprop(cam1, **kwargs)
-        cam1 = self.softmax.relprop(cam1, **kwargs)
+        # cam1 = self.attn_drop.relprop(cam1, **kwargs)
+        # cam1 = self.softmax.relprop(cam1, **kwargs)
 
         # A = Q*K^T
         #(cam_q, cam_k) = self.matmul1.relprop(cam1, **kwargs)
@@ -202,10 +204,10 @@ class Block(nn.Module):
 
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, drop=0., attn_drop=0.):
         super().__init__()
-        self.norm1 = LayerNorm(dim, eps=1e-6)
+        self.norm1 = nn.LayerNorm(dim, eps=1e-6)  # LayerNorm(dim, eps=1e-6)
         self.attn = Attention(
             dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop)
-        self.norm2 = LayerNorm(dim, eps=1e-6)
+        self.norm2 = nn.LayerNorm(dim, eps=1e-6)  # LayerNorm(dim, eps=1e-6)
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, drop=drop)
 
@@ -230,7 +232,7 @@ class Block(nn.Module):
     def relprop(self, cam, **kwargs):
         (cam1, cam2) = self.add2.relprop(cam, **kwargs)
         cam2 = self.mlp.relprop(cam2, **kwargs)
-        cam2 = self.norm2.relprop(cam2, **kwargs)
+        # cam2 = self.norm2.relprop(cam2, **kwargs)
         #cam = self.clone2.relprop((cam1, cam2), **kwargs)
         # CHECKED: equivalent using clone. relprop is almost the same (but for some small differences due to numerical precision)
         cam = cam1 + cam2
@@ -238,7 +240,7 @@ class Block(nn.Module):
 
         (cam1, cam2) = self.add1.relprop(cam, **kwargs)
         cam2 = self.attn.relprop(cam2, **kwargs)
-        cam2 = self.norm1.relprop(cam2, **kwargs)
+        # cam2 = self.norm1.relprop(cam2, **kwargs)
         #cam = self.clone1.relprop((cam1, cam2), **kwargs)
         cam = cam1 + cam2
         return cam
@@ -301,7 +303,7 @@ class VisionTransformer(nn.Module):
                 drop=drop_rate, attn_drop=attn_drop_rate)
             for i in range(depth)])
 
-        self.norm = LayerNorm(embed_dim)
+        self.norm = nn.LayerNorm(embed_dim)  # LayerNorm(embed_dim)
         if mlp_head:
             # paper diagram suggests 'MLP head', but results in 4M extra parameters vs paper
             self.head = Mlp(embed_dim, int(embed_dim * mlp_ratio), num_classes)
@@ -366,7 +368,7 @@ class VisionTransformer(nn.Module):
         # print("conservation 1", cam.sum())
         cam = self.head.relprop(cam, **kwargs)
         cam = self.pool.relprop(cam, device=device, **kwargs)
-        cam = self.norm.relprop(cam, **kwargs)
+        # cam = self.norm.relprop(cam, **kwargs)
         for blk in reversed(self.blocks):
             cam = blk.relprop(cam, **kwargs)
 

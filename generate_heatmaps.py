@@ -52,11 +52,11 @@ def compute_saliency_and_save(images, path, lrp, device):
     first = True
 
     try:
-        os.remove(os.path.join(path, 'results.hdf5'))
+        os.remove(os.path.join(path, 'results_new.hdf5'))
     except OSError:
         pass
 
-    with h5py.File(os.path.join(path, 'results.hdf5'), 'a') as f:
+    with h5py.File(os.path.join(path, 'results_new.hdf5'), 'a') as f:
         data_cam = f.create_dataset('vis',
                                     (1, 1, 224, 224),
                                     maxshape=(None, 1, 224, 224),
@@ -107,9 +107,8 @@ def compute_saliency_and_save(images, path, lrp, device):
 def imagenet_dataloader(imagenet_validation_path: str, batch_size: int = 1):
     normalize = transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
     transform = transforms.Compose([
-        # transforms.Resize(256),
-        # transforms.CenterCrop(224),
-        transforms.Resize(224),
+        transforms.Resize(256),
+        transforms.CenterCrop(224),
         transforms.ToTensor(),
         normalize,
     ])
@@ -215,7 +214,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--vit-model', type=str,
                         # required=True,
-                        default="ours",
+                        default="paper",
                         help='ours or paper')
 
     args = parser.parse_args()

@@ -180,7 +180,7 @@ if __name__ == "__main__":
                         default=16,
                         help='')
     parser.add_argument('--neg', type=bool,
-                        default=True,
+                        default=False,
                         help='')
     parser.add_argument('--scale', type=str,
                         default='per',

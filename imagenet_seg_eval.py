@@ -48,11 +48,13 @@ def eval_batch(image, labels, evaluator, index, device, lrp, results_dir, experi
 
     Res = lrp.generate_LRP(
         image.to(device),
-        start_layer=1, 
-        index=index,
+        start_layer=1,
         device=device,
         method="transformer_attribution"
     ).reshape(args.batch_size, 1, 14, 14)
+
+    Res = torch.nn.functional.interpolate(
+        Res, scale_factor=16, mode='bilinear', align_corners=False).to(device)
 
     # threshold between FG and BG is the mean
     Res = (Res - Res.min()) / (Res.max() - Res.min())
@@ -169,7 +171,7 @@ def run_seg_eval(args):
         os.makedirs(args.exp_np_path)
 
     cuda = torch.cuda.is_available()
-    device = torch.device("cuda" if cuda else "cpu")
+    device = torch.device("cuda:0" if cuda else "cpu")
 
     if args.vit_model == "ours":
         model = our_vit_base_patch16_224().to(device)
