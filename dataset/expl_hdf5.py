@@ -8,7 +8,7 @@ class ImagenetResults(Dataset):
     def __init__(self, path):
         super(ImagenetResults, self).__init__()
 
-        self.path = os.path.join(path, 'results.hdf5')
+        self.path = os.path.join(path, 'results_new.hdf5')
         self.data = None
 
         print('Reading dataset length...')
