@@ -11,6 +11,7 @@ from transformers.models.bert.configuration_bert import BertConfig
 from datasets import load_dataset, load_metric
 import argparse
 import os
+import numpy as np
 
 class BertSequenceClassificationSystem(pl.LightningModule):
     def __init__(self, huggingface_model_name, config=None):
@@ -52,6 +53,9 @@ class BertSequenceClassificationSystem(pl.LightningModule):
         torch.set_grad_enabled(True)
         hard_rationale = test_batch.pop("hard_rationale")
         explanation, one_hot_pred = self.explanator.generate_explanation(**test_batch)
+        np.savetxt("BERT_explanations/{}.csv".format(test_batch_id), explanation.numpy())
+        class_pred = torch.argmax(one_hot_pred, dim=1)
+        np.savetxt("BERT_preds/{}.csv".format(test_batch_id), np.where(class_pred==0, -1, class_pred).numpy())
         return explanation, one_hot_pred, hard_rationale
     
     # def test_step_end(self, test_step_outputs):
@@ -141,55 +145,26 @@ if __name__ == "__main__":
         bert_system.bert_classifier.save_pretrained("BertForSequenceClassification")
     else:
         print("Starting to test...")
+        os.mkdir("BERT_explanations")
+        os.mkdir("BERT_preds")
         # if args.pytorch_lightning_checkpoint_path is None:
         #     parser.error("If not training, you have to specify a checkpoint to test the model from.")
-        train_dataset = load_dataset("movie_rationales", split="train[:5]")
+        train_dataset = load_dataset("movie_rationales", split="train")
         model_config = BertConfig.from_json_file(args.bert_params)
         tokenizer = AutoTokenizer.from_pretrained(model_config.bert_vocab)
-        def get_hard_rationale(data):
-            hard_rationales = []
-            for i in range(len(data["review"])):
-                hard_rationale = []
-                for j in range(len(data["evidences"][i])):
-                    token_split = data["evidences"][i][j].split()
-                    for k in range(len(token_split)):
-                        index_in_review = data["review"][i].find(token_split[k])
-                        if index_in_review not in hard_rationale:
-                            hard_rationale.append(index_in_review)
-                hard_rationales.append(hard_rationale)
-            return {"hard_rationale": hard_rationales}
+
         def tokenize_function(data):
             return tokenizer(data["review"], padding="max_length", truncation=True)
         def label_parse(examples):
             return {"label": [1 if examples["label"][i] == 1 else 0 for i in range(len(examples["label"]))]}
-        train_dataset = train_dataset.map(get_hard_rationale, batched=True)
+
         train_dataset = train_dataset.map(tokenize_function, batched=True)
         train_dataset = train_dataset.map(label_parse, batched=True)
         train_dataset = train_dataset.remove_columns(["evidences", "review"])
         train_dataset = train_dataset.rename_column("label", "labels")
         train_dataset.set_format("torch")
-        def collate(batch):
-            collated_batch = batch[0]
-            for k in collated_batch.keys():
-                if k == "hard_rationale":
-                    collated_batch[k] = [collated_batch[k]]
-                elif k == "labels":
-                    collated_batch[k] = [collated_batch[k].item()]
-                else:
-                    collated_batch[k] = collated_batch[k].unsqueeze(0)
-            for i in range(1, len(batch)):
-                collated_batch["attention_mask"] = torch.vstack((collated_batch["attention_mask"], batch[i]["attention_mask"].unsqueeze(0)))
-                collated_batch["input_ids"] = torch.vstack((collated_batch["input_ids"], batch[i]["input_ids"].unsqueeze(0)))
-                collated_batch["labels"].append(batch[i]["labels"].item())
-                collated_batch["token_type_ids"] = torch.vstack((collated_batch["token_type_ids"], batch[i]["token_type_ids"].unsqueeze(0)))
-                collated_batch["hard_rationale"].append(batch[i]["hard_rationale"])
-            for k in collated_batch.keys():
-                if k == "labels":
-                    collated_batch[k] = torch.tensor(collated_batch[k])
-                elif not k == "hard_rationale":
-                    collated_batch[k] = collated_batch[k].float().requires_grad_(True)
-            return collated_batch
-        train_dataloader = DataLoader(train_dataset, batch_size=model_config.evidence_classifier["batch_size"], collate_fn=collate)
+
+        train_dataloader = DataLoader(train_dataset, batch_size=model_config.evidence_classifier["batch_size"])
 
         bert_system = BertSequenceClassificationSystem(model_config.bert_dir, config=model_config)
         trainer = pl.Trainer(
@@ -197,10 +172,6 @@ if __name__ == "__main__":
             default_root_dir=args.pytorch_lightning_checkpoint_dir,
             gradient_clip_val=model_config.evidence_classifier["max_grad_norm"])
         trainer.test(bert_system, train_dataloader, ckpt_path=args.pytorch_lightning_checkpoint_path)
-
-
-
-        # Not finished!
 
 
 
