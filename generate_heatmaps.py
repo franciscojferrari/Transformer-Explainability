@@ -93,9 +93,15 @@ def compute_saliency_and_save(images, path, lrp, device):
 
             index = None
 
-            Res = lrp.generate_LRP(
-                data, start_layer=1, method="grad", index=index, device=device
-            ).reshape(data.shape[0], 1, 14, 14,)
+            if args.method == 'transformer_attribution':
+                Res = lrp.generate_LRP(
+                    data, start_layer=1, method="grad", index=index, device=device
+                ).reshape(data.shape[0], 1, 14, 14,)
+
+            if args.method == 'partial_lrp':
+                Res = lrp.generate_LRP(
+                    data, start_layer=1, method="transformer_attribution", index=index, device=device
+                ).reshape(data.shape[0], 1, 14, 14,)
 
             Res = torch.nn.functional.interpolate(Res, scale_factor=16, mode='bilinear').to(device)
 
@@ -211,11 +217,14 @@ if __name__ == "__main__":
                         # required=True,
                         default="/home/tf-exp-o-data/",
                         help='')
-
     parser.add_argument('--vit-model', type=str,
                         # required=True,
                         default="paper",
                         help='ours or paper')
+    parser.add_argument('--method', type=str,
+                        # required=True,
+                        default="transformer_attribution",
+                        help='')
 
     args = parser.parse_args()
     args.imagenet_validation_path = os.path.join(args.work_path, "imgnet_val")

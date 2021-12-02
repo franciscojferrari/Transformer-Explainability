@@ -19,7 +19,7 @@ def _cfg(url='', **kwargs):
         'url': url,
         'num_classes': 1000, 'input_size': (3, 224, 224), 'pool_size': None,
         'crop_pct': .9, 'interpolation': 'bicubic',
-        'first_conv': 'patch_embed.proj', 'classifier': 'head',
+        'first_conv': '.proj', 'classifier': 'head',
         **kwargs
     }
 
@@ -173,10 +173,10 @@ class Attention(nn.Module):
         (cam1, cam_v) = self.matmul2_custom.relprop(cam)
         #print('%d\t%d' % (torch.equal(cam1, cam1_2), torch.equal(cam_v, cam_v_2)))
 
-        # cam1 /= 2
-        # cam_v /= 2
-        cam1 = cam1 * 2/3
-        cam_v /= 3
+        cam1 /= 2
+        cam_v /= 2
+        #cam1 = cam1 * 2/3
+        #cam_v /= 3
 
         self.save_v_cam(cam_v)
         self.save_attn_cam(cam1)
@@ -364,16 +364,11 @@ class VisionTransformer(nn.Module):
     def relprop(
             self, cam=None, method="transformer_attribution", is_ablation=False, start_layer=0,
             device='cuda', **kwargs):
-        # print(kwargs)
-        # print("conservation 1", cam.sum())
         cam = self.head.relprop(cam, **kwargs)
         cam = self.pool.relprop(cam, device=device, **kwargs)
         # cam = self.norm.relprop(cam, **kwargs)
         for blk in reversed(self.blocks):
             cam = blk.relprop(cam, **kwargs)
-
-        # print("conservation 2", cam.sum())
-        # print("min", cam.min())
 
         if method == "full":
             (cam, _) = self.add.relprop(cam, **kwargs)

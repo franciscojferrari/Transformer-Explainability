@@ -24,6 +24,14 @@ class LRP:
         self.model.zero_grad()
         one_hot.backward(retain_graph=True)
 
-        return self.model.relprop(torch.tensor(one_hot_vector).to(device),
+        if method == 'partial_lrp' or method == 'full':
+            R = self.model.relprop(torch.tensor(one_hot_vector).to(device),method='full', 
+                is_ablation=is_ablation, start_layer=start_layer,
+                device=device, **kwargs)
+
+        if method == "transformer_attribution":
+            R = self.model.relprop(torch.tensor(one_hot_vector).to(device),
                                   method=method, is_ablation=is_ablation, start_layer=start_layer,
                                   device=device, **kwargs)
+
+        return R
