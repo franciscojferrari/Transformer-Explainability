@@ -8,7 +8,7 @@ class BertForSequenceClassificationExplanator:
         self.bert_model = bert_model
         self.bert_model.eval()
 
-    def generate_explanation(self, normalize_scores=True, **input):
+    def generate_explanation(self, normalize_scores=True, get_logits=False, **input):
         output = self.bert_model(**input)
         logits = output.logits.reshape(input["input_ids"].shape[0], self.bert_model.config.num_labels)
         one_hot = torch.nn.functional.one_hot(torch.argmax(logits, dim=1), self.bert_model.config.num_labels)
@@ -34,7 +34,8 @@ class BertForSequenceClassificationExplanator:
             weighted_attention_relevance = \
                 (weighted_attention_relevance - weighted_attention_relevance.min()) / \
                 (weighted_attention_relevance.max() - weighted_attention_relevance.min())
-            return weighted_attention_relevance, one_hot
+        if get_logits:
+            return weighted_attention_relevance, one_hot, logits
         return weighted_attention_relevance, one_hot
 
     def vizualize(self, explanations, tokens, pred, label, label_string, label_being_explained=1):
@@ -43,23 +44,24 @@ class BertForSequenceClassificationExplanator:
             #     if not(tokens[j] == "[PAD]") and not(tokens[j] == "[CLS]"):
             #         print((tokens[j], explanations[i, j].item()))
             mult = torch.max(explanations[i])
-            print([(tokens[i][j], explanations[i, j].item()) for j in range(len(tokens[i]))])
+            print([(tokens[i][j], explanations[i, j].item()) for j in range(len(tokens[i].split()))])
             vis_data_records = [visualization.VisualizationDataRecord(
-                                            ((1/mult) * explanations[i, :len(tokens[i])]).detach().numpy(),
+                                            ((1/mult) * explanations[i, :len(tokens[i].split())]).detach().numpy(),
                                             pred[i].item(),
                                             label_string[pred[i].item()],
                                             label_string[label[i].item()],
                                             label_string[label_being_explained],
-                                            explanations[i].sum(),       
+                                            1,       
                                             tokens[i],
                                             1)]
             visualization.visualize_text(vis_data_records)
 
 if __name__ == "__main__":
-    huggingface_model_name = "textattack/bert-base-uncased-SST-2"
+    # huggingface_model_name = "textattack/bert-base-uncased-SST-2"
+    huggingface_model_name = "/home/sandor/Master/DD2412 Deep Learning, Advanced Course/Transformer-Explainability/BertForSequenceClassification"
 
     from transformers import AutoTokenizer
-    tokenizer = AutoTokenizer.from_pretrained(huggingface_model_name)
+    tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
 
     inputs = tokenizer(
         ["This movie was the best movie I have ever seen! some scenes were ridiculous, but acting was great.",
@@ -67,11 +69,11 @@ if __name__ == "__main__":
         return_tensors="pt", padding="max_length", truncation=True)
     # tokens = [tokenizer.convert_ids_to_tokens(inputs["input_ids"][i]) for i in range(inputs["input_ids"].shape[0])]
     tokens = ["This movie was the best movie I have ever seen! some scenes were ridiculous, but acting was great.",
-        "Pretty gud moive",
         "This movie is utter shit"]
 
     model = BertForSequenceClassification.from_pretrained(huggingface_model_name, num_labels=2)
     print("Using activation func: ", model.config.hidden_act)
     explanator = BertForSequenceClassificationExplanator(model)
     exp, pred = explanator.generate_explanation(**inputs)
-    explanator.vizualize(exp, tokens, torch.argmax(pred,dim=1), torch.tensor([1, 1, 0]), ["NEG", "POS"])
+    explanator.vizualize(exp, tokens, torch.argmax(pred,dim=1), torch.tensor([1, 0]), ["NEG", "POS"])
+    pass

@@ -20,7 +20,7 @@
             "NEG",
             "POS"
         ],
-        "batch_size": 1,
+        "batch_size": 16,
         "warmup_steps": 50,
         "epochs": 10,
         "patience": 10,
