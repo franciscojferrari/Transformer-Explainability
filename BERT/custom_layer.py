@@ -176,7 +176,7 @@ class IndexSelect(torch.nn.Module):
     # The index itself as a torch.Tensor
     def forward(self, inputs, dim, indices):
         self.module_input = [inputs, dim, indices] 
-        return torch.index_select(inputs, dim, indices)
+        return torch.index_select(inputs, dim, indices.to(inputs.device))
 
     def relevance_propagation(self, prev_rel, **kwargs):
         output = torch.index_select(*self.module_input)

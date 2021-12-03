@@ -89,12 +89,11 @@ if __name__ == "__main__":
     parser.add_argument("-n", "--num-dataloader-workers", type=int, help="Set the num_workers of the DataLoader.")
     args = parser.parse_args()
 
-    if args.pytorch_lightning_checkpoint_dir is None:
-        parser.error('You have to specify checkpoint directory for pytorch lightning')
     if args.bert_params is None:
         parser.error("You have to specify the bert_params")
-    if not os.path.isdir(args.pytorch_lightning_checkpoint_dir):
-        parser.error("{} is not a folder or does not exist".format(args.pytorch_lightning_checkpoint_dir))
+    if args.pytorch_lightning_checkpoint_dir is not None:
+        if not os.path.isdir(args.pytorch_lightning_checkpoint_dir):
+            parser.error("{} is not a folder or does not exist".format(args.pytorch_lightning_checkpoint_dir))
     if args.pytorch_lightning_checkpoint_path is not None and args.bert_dir is not None:
         parser.error("Can't specify both pytorch lightning checkpoint and huggingface BERT model dir.")
 
@@ -142,7 +141,7 @@ if __name__ == "__main__":
             default_root_dir=args.pytorch_lightning_checkpoint_dir,
             gradient_clip_val=model_config.evidence_classifier["max_grad_norm"], # Defaults to gradient_clip_algorithm="norm"
             gpus=0 if args.gpus is None else args.gpus)
-        trainer.fit(bert_system, train_dataloader=train_dataloader, val_dataloaders=val_dataloader, ckpt_path=args.pytorch_lightning_checkpoint_path)
+        trainer.fit(bert_system, train_dataloader=train_dataloader, val_dataloaders=val_dataloader)
         try:
             trainer.save_checkpoint(os.path.join(args.pytorch_lightning_checkpoint_dir, "final_checkpoint"))
         except:
@@ -155,8 +154,6 @@ if __name__ == "__main__":
             os.mkdir("BERT_preds")
         except FileExistsError:
             pass
-        # if args.pytorch_lightning_checkpoint_path is None:
-        #     parser.error("If not training, you have to specify a checkpoint to test the model from.")
         train_dataset = load_dataset("movie_rationales", split="train")
         model_config = BertConfig.from_json_file(args.bert_params)
         tokenizer = AutoTokenizer.from_pretrained(model_config.bert_vocab)
@@ -182,7 +179,7 @@ if __name__ == "__main__":
             default_root_dir=args.pytorch_lightning_checkpoint_dir,
             gradient_clip_val=model_config.evidence_classifier["max_grad_norm"],
             gpus=0 if args.gpus is None else args.gpus)
-        trainer.test(bert_system, train_dataloader, ckpt_path=args.pytorch_lightning_checkpoint_path)
+        trainer.test(bert_system, train_dataloader)
 
 
 
