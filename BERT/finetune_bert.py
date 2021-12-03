@@ -51,12 +51,10 @@ class BertSequenceClassificationSystem(pl.LightningModule):
 
     def test_step(self, test_batch, test_batch_id):
         torch.set_grad_enabled(True)
-        hard_rationale = test_batch.pop("hard_rationale")
         explanation, one_hot_pred = self.explanator.generate_explanation(**test_batch)
-        np.savetxt("BERT_explanations/{}.csv".format(test_batch_id), explanation.numpy())
-        class_pred = torch.argmax(one_hot_pred, dim=1)
-        np.savetxt("BERT_preds/{}.csv".format(test_batch_id), np.where(class_pred==0, -1, class_pred).numpy())
-        return explanation, one_hot_pred, hard_rationale
+        np.savetxt("BERT_explanations/{}.csv".format(test_batch_id), explanation.detach().numpy())
+        class_pred = torch.argmax(one_hot_pred, dim=1).detach().numpy()
+        np.savetxt("BERT_preds/{}.csv".format(test_batch_id), np.where(class_pred==0, -1, class_pred))
     
     # def test_step_end(self, test_step_outputs):
     #     explanations = [test_step_outputs[0] for _ in range(len(test_step_outputs))]
@@ -84,15 +82,21 @@ if __name__ == "__main__":
     parser.add_argument("-c", "--pytorch-lightning-checkpoint-dir", type=str,
                     help="Path to the pytorch checkpoint directory (Can be a brand new or earliear directory).")
     parser.add_argument("-ckpt", "--pytorch-lightning-checkpoint-path", type=str,
-                    help="Path to a specific pytorch lightning checkpoint.")
+                    help="Path to a specific pytorch lightning checkpoint. Can not specify -ckpt and -b at the same time")
     parser.add_argument("-t", "--train", action='store_true', help="Flag to train the model. Otherwise you test the model.")
+    parser.add_argument("-g", "--gpus", type=int, help="Choose amount of gpus to execute the model with")
+    parser.add_argument("-b", "--bert-dir", type=str, help="Set the bert dir to load the huggingface model from. Can not specify -ckpt and -b at the same time.")
+    parser.add_argument("-n", "--num-dataloader-workers", type=int, help="Set the num_workers of the DataLoader.")
     args = parser.parse_args()
+
     if args.pytorch_lightning_checkpoint_dir is None:
         parser.error('You have to specify checkpoint directory for pytorch lightning')
     if args.bert_params is None:
         parser.error("You have to specify the bert_params")
     if not os.path.isdir(args.pytorch_lightning_checkpoint_dir):
         parser.error("{} is not a folder or does not exist".format(args.pytorch_lightning_checkpoint_dir))
+    if args.pytorch_lightning_checkpoint_path is not None and args.bert_dir is not None:
+        parser.error("Can't specify both pytorch lightning checkpoint and huggingface BERT model dir.")
 
     if args.train:
         print("Starting to train...")
@@ -121,8 +125,8 @@ if __name__ == "__main__":
         val_dataset = val_dataset.rename_column("label", "labels")
         val_dataset.set_format("torch")
 
-        train_dataloader = DataLoader(train_dataset, shuffle=True, batch_size=model_config.evidence_classifier["batch_size"])
-        val_dataloader = DataLoader(val_dataset, shuffle=False, batch_size=model_config.evidence_classifier["batch_size"]) # Validation batch size is hardcoded =32 in Hila Chefers code for some reason
+        train_dataloader = DataLoader(train_dataset, shuffle=True, batch_size=model_config.evidence_classifier["batch_size"], num_workers=1 if args.num_dataloader_workers is None else args.num_dataloader_workers)
+        val_dataloader = DataLoader(val_dataset, shuffle=False, batch_size=model_config.evidence_classifier["batch_size"], num_workers=1 if args.num_dataloader_workers is None else args.num_dataloader_workers) # Validation batch size is hardcoded =32 in Hila Chefers code for some reason
 
         # Set up and train model
         model_config.num_labels = len(model_config.evidence_classifier["classes"])
@@ -132,11 +136,12 @@ if __name__ == "__main__":
             patience=model_config.evidence_classifier["patience"], 
             verbose=False, 
             mode="max")
-        bert_system = BertSequenceClassificationSystem(model_config.bert_dir, config=model_config)
+        bert_system = BertSequenceClassificationSystem(model_config.bert_dir if args.bert_dir is None else args.bert_dir, config=model_config)
         trainer = pl.Trainer(
             max_epochs = model_config.evidence_classifier["epochs"],
             default_root_dir=args.pytorch_lightning_checkpoint_dir,
-            gradient_clip_val=model_config.evidence_classifier["max_grad_norm"]) # Defaults to gradient_clip_algorithm="norm"
+            gradient_clip_val=model_config.evidence_classifier["max_grad_norm"], # Defaults to gradient_clip_algorithm="norm"
+            gpus=0 if args.gpus is None else args.gpus)
         trainer.fit(bert_system, train_dataloader=train_dataloader, val_dataloaders=val_dataloader, ckpt_path=args.pytorch_lightning_checkpoint_path)
         try:
             trainer.save_checkpoint(os.path.join(args.pytorch_lightning_checkpoint_dir, "final_checkpoint"))
@@ -145,8 +150,11 @@ if __name__ == "__main__":
         bert_system.bert_classifier.save_pretrained("BertForSequenceClassification")
     else:
         print("Starting to test...")
-        os.mkdir("BERT_explanations")
-        os.mkdir("BERT_preds")
+        try:
+            os.mkdir("BERT_explanations")
+            os.mkdir("BERT_preds")
+        except FileExistsError:
+            pass
         # if args.pytorch_lightning_checkpoint_path is None:
         #     parser.error("If not training, you have to specify a checkpoint to test the model from.")
         train_dataset = load_dataset("movie_rationales", split="train")
@@ -164,13 +172,16 @@ if __name__ == "__main__":
         train_dataset = train_dataset.rename_column("label", "labels")
         train_dataset.set_format("torch")
 
-        train_dataloader = DataLoader(train_dataset, batch_size=model_config.evidence_classifier["batch_size"])
-
-        bert_system = BertSequenceClassificationSystem(model_config.bert_dir, config=model_config)
+        train_dataloader = DataLoader(train_dataset, batch_size=model_config.evidence_classifier["batch_size"], num_workers=1 if args.num_dataloader_workers is None else args.num_dataloader_workers)
+        if args.bert_dir is None:
+            bert_system = BertSequenceClassificationSystem(model_config.bert_dir, config=model_config)
+        else:
+            bert_system = BertSequenceClassificationSystem(args.bert_dir)
         trainer = pl.Trainer(
             max_epochs = model_config.evidence_classifier["epochs"],
             default_root_dir=args.pytorch_lightning_checkpoint_dir,
-            gradient_clip_val=model_config.evidence_classifier["max_grad_norm"])
+            gradient_clip_val=model_config.evidence_classifier["max_grad_norm"],
+            gpus=0 if args.gpus is None else args.gpus)
         trainer.test(bert_system, train_dataloader, ckpt_path=args.pytorch_lightning_checkpoint_path)
 
 
