@@ -63,12 +63,14 @@ class BertSequenceClassificationSystem(pl.LightningModule):
 
     def test_step(self, test_batch, test_batch_id):
         torch.set_grad_enabled(True)
-        explanation, one_hot_pred = self.explanator.generate_explanation(**test_batch)
+        explanation, one_hot_pred, logits = self.explanator.generate_explanation(**test_batch, get_logits=True)
         np.savetxt("BERT_explanations/{}.csv".format(test_batch_id), explanation.detach().numpy())
         class_pred = torch.argmax(one_hot_pred, dim=1)
         np.savetxt("BERT_preds/{}.csv".format(test_batch_id),
                    class_pred.detach().numpy())
-        return explanation, one_hot_pred
+        np.savetxt("BERT_logits/{}.csv".format(test_batch_id),
+                   logits.detach().numpy())
+        return None
 
     # def test_step_end(self, test_step_outputs):
     #     explanations = [test_step_outputs[0] for _ in range(len(test_step_outputs))]
@@ -171,7 +173,14 @@ if __name__ == "__main__":
         print("Starting to test...")
         try:
             os.mkdir("BERT_explanations")
+        except FileExistsError:
+            pass
+        try:
             os.mkdir("BERT_preds")
+        except FileExistsError:
+            pass
+        try:
+            os.mkdir("BERT_logits")
         except FileExistsError:
             pass
         train_dataset = load_dataset("movie_rationales", split="train")

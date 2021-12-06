@@ -10,6 +10,5 @@ if __name__ == "__main__":
         preds[i] = np.loadtxt(file_path)
     train_dataset = load_dataset("movie_rationales", split="train")
     truth = np.array(train_dataset["label"])
-    preds = np.where(preds == -1, 0, 1)
     print("Acc: {}".format((preds == truth).sum() / truth.shape[0]))
 
