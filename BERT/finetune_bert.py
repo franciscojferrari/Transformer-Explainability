@@ -64,10 +64,10 @@ class BertSequenceClassificationSystem(pl.LightningModule):
     def test_step(self, test_batch, test_batch_id):
         torch.set_grad_enabled(True)
         explanation, one_hot_pred = self.explanator.generate_explanation(**test_batch)
-        np.savetxt("BERT_explanations/{}.csv".format(test_batch_id), explanation.numpy())
+        np.savetxt("BERT_explanations/{}.csv".format(test_batch_id), explanation.detach().numpy())
         class_pred = torch.argmax(one_hot_pred, dim=1)
         np.savetxt("BERT_preds/{}.csv".format(test_batch_id),
-                   np.where(class_pred == 0, -1, class_pred).numpy())
+                   np.where(class_pred == 0, -1, class_pred).detach().numpy())
         return explanation, one_hot_pred
 
     # def test_step_end(self, test_step_outputs):
@@ -190,7 +190,7 @@ if __name__ == "__main__":
         train_dataset = train_dataset.rename_column("label", "labels")
         train_dataset.set_format("torch")
 
-        train_dataloader = DataLoader(train_dataset, batch_size=model_config.evidence_classifier["batch_size"], num_workers=1 if args.num_dataloader_workers is None else args.num_dataloader_workers)
+        train_dataloader = DataLoader(train_dataset, batch_size=1, num_workers=1 if args.num_dataloader_workers is None else args.num_dataloader_workers)
         if args.bert_dir is not None:
             bert_system = BertSequenceClassificationSystem(model_config.bert_dir, config=model_config)
         elif args.pytorch_lightning_checkpoint_path is not None:
