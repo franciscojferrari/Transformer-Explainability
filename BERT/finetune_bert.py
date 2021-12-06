@@ -67,7 +67,7 @@ class BertSequenceClassificationSystem(pl.LightningModule):
         np.savetxt("BERT_explanations/{}.csv".format(test_batch_id), explanation.detach().numpy())
         class_pred = torch.argmax(one_hot_pred, dim=1)
         np.savetxt("BERT_preds/{}.csv".format(test_batch_id),
-                   np.where(class_pred == 0, -1, class_pred).detach().numpy())
+                   class_pred.detach().numpy())
         return explanation, one_hot_pred
 
     # def test_step_end(self, test_step_outputs):
