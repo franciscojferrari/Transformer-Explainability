@@ -24,14 +24,14 @@ class LRP:
         self.model.zero_grad()
         one_hot.backward(retain_graph=True)
 
-        if method == 'partial_lrp' or method == 'full':
-            R = self.model.relprop(torch.tensor(one_hot_vector).to(device),method='full', 
-                is_ablation=is_ablation, start_layer=start_layer,
-                device=device, **kwargs)
+        R = self.model.relprop(torch.tensor(one_hot_vector).to(device),method=method, 
+            is_ablation=is_ablation, start_layer=start_layer,
+            device=device, **kwargs)
 
-        if method == "transformer_attribution":
-            R = self.model.relprop(torch.tensor(one_hot_vector).to(device),
-                                  method=method, is_ablation=is_ablation, start_layer=start_layer,
-                                  device=device, **kwargs)
+        if method == 'partial_lrp':
+            R = R.reshape(input.shape[0], 1, 224, 224)
+        else:
+            R = R.reshape(input.shape[0], 1, 14, 14)
+            R = torch.nn.functional.interpolate(R, scale_factor=16, mode='bilinear').to(device)
 
         return R

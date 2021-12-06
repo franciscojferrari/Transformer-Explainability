@@ -93,24 +93,12 @@ def compute_saliency_and_save(images, path, lrp, device):
 
             index = None
 
-            if args.method == 'transformer_attribution':
-                Res = lrp.generate_LRP(
-                    data, start_layer=1, method="grad", index=index, device=device
-                ).reshape(data.shape[0], 1, 14, 14,)
-
-            if args.method == 'partial_lrp':
-                Res = lrp.generate_LRP(
-                    data, start_layer=1, method="transformer_attribution", index=index, device=device
-                ).reshape(data.shape[0], 1, 14, 14,)
-
-            Res = torch.nn.functional.interpolate(Res, scale_factor=16, mode='bilinear').to(device)
+            Res = lrp.generate_LRP(
+                data, start_layer=1, method=args.method, index=index, device=device)
 
             Res = (Res - Res.min()) / (Res.max() - Res.min())
 
             data_cam[-data.shape[0]:] = Res.data.cpu().numpy()
-
-            if batch_idx == 300:
-                break
 
 
 def imagenet_dataloader(imagenet_validation_path: str, batch_size: int = 1):

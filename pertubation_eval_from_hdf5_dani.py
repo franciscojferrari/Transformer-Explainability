@@ -150,7 +150,6 @@ def eval(model, imagenet_ds, sample_loader, device, args):
         np.std(num_correct_pertub_original_prediction, axis=1))
     # print(np.mean(dissimilarity_pertub, axis=1), np.std(dissimilarity_pertub, axis=1))
 
-
 def pertturbation_eval(args):
     torch.multiprocessing.set_start_method('spawn')
 

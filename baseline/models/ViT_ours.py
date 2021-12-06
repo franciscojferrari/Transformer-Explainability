@@ -364,21 +364,29 @@ class VisionTransformer(nn.Module):
     def relprop(
             self, cam=None, method="transformer_attribution", is_ablation=False, start_layer=0,
             device='cuda', **kwargs):
+
+        # (Relevance · Attention) only in the last block
+        if method == "last_layer":
+            cam = self.head.relprop(cam, **kwargs)
+            cam = self.pool.relprop(cam, device=device, **kwargs)
+            cam = self.blocks[-1].relprop(cam, **kwargs)
+            cam = self.blocks[-1].attn.get_attn_cam()
+            cam = cam[0].reshape(-1, cam.shape[-1], cam.shape[-1])
+            grad = self.blocks[-1].attn.get_attn_gradients()
+            grad = grad[0].reshape(-1, grad.shape[-1], grad.shape[-1])
+            cam = grad * cam
+            cam = cam.clamp(min=0).mean(dim=0)
+            cam = cam[0, 1:]
+            return cam
+
         cam = self.head.relprop(cam, **kwargs)
         cam = self.pool.relprop(cam, device=device, **kwargs)
         # cam = self.norm.relprop(cam, **kwargs)
         for blk in reversed(self.blocks):
             cam = blk.relprop(cam, **kwargs)
 
-        if method == "full":
-            (cam, _) = self.add.relprop(cam, **kwargs)
-            cam = cam[:, 1:]
-            cam = self.patch_embed.relprop(cam, **kwargs)
-            # sum on channels
-            cam = cam.sum(dim=1)
-            return cam
-
-        elif method == "rollout":
+        # gradient rollout
+        if method == "rollout":
             # cam rollout
             attn_cams = []
             for blk in self.blocks:
@@ -389,7 +397,16 @@ class VisionTransformer(nn.Module):
             cam = cam[:, 0, 1:]
             return cam
 
-        # our method, method name grad is legacy
+        # Partial LRP? previously "full"
+        if method == "partial_lrp":
+            (cam, _) = self.add.relprop(cam, **kwargs)
+            cam = cam[:, 1:]
+            cam = self.patch_embed.relprop(cam, **kwargs)
+            # sum on channels
+            cam = cam.sum(dim=1)
+            return cam
+
+        # Our method
         elif method == "transformer_attribution" or method == "grad":
             cams = []
             for blk in self.blocks:
@@ -404,34 +421,17 @@ class VisionTransformer(nn.Module):
             cam = rollout[:, 0, 1:]
             return cam
 
-        elif method == "last_layer":
-            cam = self.blocks[-1].attn.get_attn_cam()
-            cam = cam[0].reshape(-1, cam.shape[-1], cam.shape[-1])
-            if is_ablation:
-                grad = self.blocks[-1].attn.get_attn_gradients()
-                grad = grad[0].reshape(-1, grad.shape[-1], grad.shape[-1])
-                cam = grad * cam
-            cam = cam.clamp(min=0).mean(dim=0)
-            cam = cam[0, 1:]
-            return cam
-
-        elif method == "last_layer_attn":
-            cam = self.blocks[-1].attn.get_attn()
-            cam = cam[0].reshape(-1, cam.shape[-1], cam.shape[-1])
-            cam = cam.clamp(min=0).mean(dim=0)
-            cam = cam[0, 1:]
-            return cam
-
         elif method == "second_layer":
             cam = self.blocks[1].attn.get_attn_cam()
             cam = cam[0].reshape(-1, cam.shape[-1], cam.shape[-1])
-            if is_ablation:
-                grad = self.blocks[1].attn.get_attn_gradients()
-                grad = grad[0].reshape(-1, grad.shape[-1], grad.shape[-1])
-                cam = grad * cam
+            grad = self.blocks[1].attn.get_attn_gradients()
+            grad = grad[0].reshape(-1, grad.shape[-1], grad.shape[-1])
+            cam = grad * cam
             cam = cam.clamp(min=0).mean(dim=0)
             cam = cam[0, 1:]
             return cam
+
+        raise 'method not supported'
 
 
 def _conv_filter(state_dict, patch_size=16):
