@@ -68,7 +68,7 @@ class BertSequenceClassificationSystem(pl.LightningModule):
         class_pred = torch.argmax(one_hot_pred, dim=1)
         np.savetxt("BERT_preds/{}.csv".format(test_batch_id),
                    np.where(class_pred == 0, -1, class_pred).numpy())
-        return explanation, one_hot_pred, hard_rationale
+        return explanation, one_hot_pred
 
     # def test_step_end(self, test_step_outputs):
     #     explanations = [test_step_outputs[0] for _ in range(len(test_step_outputs))]
@@ -99,8 +99,8 @@ if __name__ == "__main__":
         "-c", "--pytorch-lightning-checkpoint-dir", type=str,
         help="Path to the pytorch checkpoint directory (Can be a brand new or earliear directory).")
     parser.add_argument("-ckpt", "--pytorch-lightning-checkpoint-path", type=str,
-                    help="Path to a specific pytorch lightning checkpoint. Can not specify -ckpt and -b at the same time")
-    parser.add_argument("-t", "--train", action='store_true', help="Flag to train the model. Otherwise you test the model.")
+                    help="Path to a specific pytorch lightning checkpoint. Cannot specify -ckpt and -b at the same time")
+    parser.add_argument("-t", "--train", action='store_true', help="Flag to train the model. Otherwise, you test the model.")
     parser.add_argument("-g", "--gpus", type=int, help="Choose amount of gpus to execute the model with")
     parser.add_argument("-b", "--bert-dir", type=str, help="Set the bert dir to load the huggingface model from. Can not specify -ckpt and -b at the same time.")
     parser.add_argument("-n", "--num-dataloader-workers", type=int, help="Set the num_workers of the DataLoader.")
@@ -191,8 +191,18 @@ if __name__ == "__main__":
         train_dataset.set_format("torch")
 
         train_dataloader = DataLoader(train_dataset, batch_size=model_config.evidence_classifier["batch_size"], num_workers=1 if args.num_dataloader_workers is None else args.num_dataloader_workers)
-        if args.bert_dir is None:
+        if args.bert_dir is not None:
             bert_system = BertSequenceClassificationSystem(model_config.bert_dir, config=model_config)
+        elif args.pytorch_lightning_checkpoint_path is not None:
+            bert_system = BertSequenceClassificationSystem(model_config.bert_dir)
+            print("\n--- Making a new huggingface model and loading state dict, so don't be suprised about huggingface warnings. ---\n")
+            if args.gpus is None:
+                state_dict = torch.load(args.pytorch_lightning_checkpoint_path, map_location=torch.device("cpu"))
+            elif args.gpus == 0:
+                state_dict = torch.load(args.pytorch_lightning_checkpoint_path, map_location=torch.device("cpu"))
+            else:
+                state_dict = torch.load(args.pytorch_lightning_checkpoint_path)
+            bert_system.bert_classifier.load_state_dict(state_dict, strict=False)
         else:
             bert_system = BertSequenceClassificationSystem(args.bert_dir)
         trainer = pl.Trainer(
