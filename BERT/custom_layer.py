@@ -1,15 +1,11 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import pdb
-
-__all__ = ['forward_hook', 'Add', 'ReLU', 'GELU', 'Dropout',
-           'Linear', 'Conv2d',
-           'safe_divide', 'Softmax', 'IndexSelect', 'LayerNorm', 'MatMul1', 'MatMul2']
-
 
 def safe_divide(a, b):
     # TODO: Change to a new simpler safe_divice
+    if a.numel() == b.numel():
+        view = a.shape if a.dim() > b.dim() else b.shape
     den = b.clamp(min=1e-9) + b.clamp(max=1e-9)
     den = den + den.eq(0).type(den.type()) * 1e-9
     return a / den * b.ne(0).type(b.type())
@@ -64,6 +60,58 @@ class Dropout(nn.Dropout, RelProp):
     pass
 
 
+class RelDeepTaylor(RelProp):
+    def relprop(self, prev_rel, **kwargs):
+        output = self.forward(self.X)
+        frac = prev_rel / output
+        grad = torch.autograd.grad(output, self.X, frac, retain_graph=True)
+        
+        if torch.is_tensor(self.module_input):
+            return self.module_input * grad
+        else:
+            rels = []
+            for i, input in enumerate(self.module_input):
+                rels.append(input * grad[i])
+            return rels
+
+class TransposeForScores(torch.nn.Module):
+    # Wonky operation in BertSelfAttention
+    def forward(self, input, num_attention_heads, attention_head_size):
+        new_x_shape = input.size()[:-1] + (num_attention_heads, attention_head_size)
+        input = input.view(*new_x_shape)
+        return input.permute(0, 2, 1, 3)
+    # We just need to permute it back
+    def relprop(self, prev_rel, alpha=1):
+        return prev_rel.permute(0, 2, 1, 3).flatten(2)
+
+class CloneN(torch.nn.Module):
+    def forward(self, input, N):
+        self.X = input
+        self.N = N
+        return (input, ) * N
+    
+    def relprop(self, prev_rel, alpha=1):
+        frac = [safe_divide(r, self.X) for r in prev_rel]
+        grad_times_frac = torch.autograd.grad((self.X, )* self.N, self.X, frac)[0]
+        rel = self.X * grad_times_frac
+        return rel
+
+class Clone(torch.nn.Module):
+    # Simplified clone for returning two of the same tensors
+    def forward(self, input):
+        self.X = input
+        return (input, input)
+
+    def relprop(self, prev_rel, alpha=1):
+        frac = (safe_divide(prev_rel[0], self.X), safe_divide(prev_rel[1], self.X))
+        grad_times_frac = torch.autograd.grad((self.X, )* 2, self.X, frac)[0]
+        rel = self.X * grad_times_frac
+        return rel
+
+class Mul(RelDeepTaylor):
+    def forward(self, inputs):
+        return torch.mul(*inputs)
+
 class Add(RelProp):
     def forward(self, inputs):
         return torch.add(*inputs)
@@ -84,7 +132,7 @@ class Add(RelProp):
         a = a * safe_divide(a_fact, a.sum())
         b = b * safe_divide(b_fact, b.sum())
 
-        outputs = [a, b]
+        outputs = (a, b)
         return outputs
 
 
@@ -99,9 +147,9 @@ class IndexSelect(RelProp):
     def relprop(self, R, alpha, device):
         # CHECKED. Same as original implementation
         # We get R from the classification head, which is connected to final token 0
-        # We have to expand the relevance R to acount for all 197 tokens, and init R as 0 for the rest of the tokens
-        R_new = torch.zeros((1, 197, 768)).to(device)
-        R_new[:, 0, :] = R
+        # We have to expand the relevance R to acount for all 512 tokens, and init R as 0 for the rest of the tokens
+        R_new = torch.zeros(self.X.shape).to(device)
+        R_new[:, 0] = R
         return R_new
 
 
@@ -112,13 +160,13 @@ class Linear(nn.Linear, RelProp):
         else:
             return self.relprop_alphabeta(R)
 
-    def relprop_eps(self, R):
+    def relprop_eps(self, R, **kwargs):
         Z = self.forward(self.X)
         S = safe_divide(R, Z)
         C = S @ self.weight
         return self.X * C
 
-    def relprop_alphabeta(self, R):
+    def relprop_alphabeta(self, R, **kwargs):
         # CHECKED: same as their implementation when alpha=1
         pw = torch.clamp(self.weight, min=0)
         nw = torch.clamp(self.weight, max=0)
@@ -136,7 +184,7 @@ class Linear(nn.Linear, RelProp):
 
 class MatMul1(RelProp):
     # Inheriting from RelProp we get the forward hook that sets self.X = [q, k]
-    def relprop(self, R):
+    def relprop(self, R, **kwargs):
         '''
         LRP_eps for matrix multiplication
         STATUS: it works for the last block, but for rest cam_k is not the same as original repo (cam_q is OK)
@@ -159,7 +207,7 @@ class MatMul1(RelProp):
 
 
 class MatMul2(RelProp):
-    def relprop(self, R):
+    def relprop(self, R, **kwargs):
         '''
         LRP_eps for matrix multiplication
         '''
@@ -170,13 +218,13 @@ class MatMul2(RelProp):
         S = safe_divide(R, Z)
         '''
         dims: 
-        S = (1, 12, 197, 64) = (1, h, s, Dh)
-        V = (1, 12, 197, 64) = (1, h, s, Dh)
-        A = (1, 12, 197, 197) = (1, h, s, s)    
+        S = (1, 12, 512, 64) = (1, h, s, Dh)
+        V = (1, 12, 512, 64) = (1, h, s, Dh)
+        A = (1, 12, 512, 512) = (1, h, s, s)    
         '''
-        C1 = S @ V.permute(0, 1, 3, 2)  # C1 = (1, 12, 197, 197)
-        C2 = S.permute(0, 1, 3, 2) @ A  # C2 = (1, 12, 197, 64)
-        return [A * C1, V * C2.permute(0, 1, 3, 2)]
+        C1 = S @ V.permute(0, 1, 3, 2)  # C1 = (1, 12, 512, 512)
+        C2 = S.permute(0, 1, 3, 2) @ A  # C2 = (1, 12, 512, 64)
+        return [A * C1 / 2, V * C2.permute(0, 1, 3, 2) / 2]
 
     def forward(self, X):
         assert len(X) == 2

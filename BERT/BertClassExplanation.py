@@ -1,5 +1,5 @@
 from torch.nn.functional import one_hot
-from custom_bert import BertForSequenceClassification
+from BERT.custom_bert import BertForSequenceClassification
 import torch
 from captum.attr import visualization
 
@@ -63,6 +63,7 @@ if __name__ == "__main__":
         ["This movie was the best movie I have ever seen! some scenes were ridiculous, but acting was great."],
         return_tensors="pt", padding="max_length", truncation=True)
     tokens = [tokenizer.convert_ids_to_tokens(inputs["input_ids"][i]) for i in range(inputs["input_ids"].shape[0])]
+    del tokenizer
     # tokens = ["This movie was the best movie I have ever seen! some scenes were ridiculous, but acting was great.", "This movie is utter shit"]
 
     model = BertForSequenceClassification.from_pretrained(huggingface_model_name, num_labels=2)

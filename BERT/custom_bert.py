@@ -6,7 +6,7 @@ from transformers.models.bert.modeling_bert import BertPreTrainedModel
 from transformers.modeling_outputs import BaseModelOutputWithPoolingAndCrossAttentions, BaseModelOutputWithPastAndCrossAttentions, SequenceClassifierOutput
 from transformers.activations import ACT2FN
 
-from custom_layer import *
+from BERT.custom_layer import *
 
 from packaging import version
 import math
@@ -16,6 +16,11 @@ from transformers.modeling_utils import (
     find_pruneable_heads_and_indices,
     prune_linear_layer,
 )
+
+from BERT.custom_layer import TransposeForScores
+from BERT.custom_layer import CloneN
+from BERT.custom_layer import Clone
+from BERT.custom_layer import Mul
 
 # Base model of BERT gotten from huggingfaces: https://github.com/huggingface/transformers/blob/master/src/transformers/models/bert/modeling_bert.py
 
@@ -205,7 +210,7 @@ class BertPooler(torch.nn.Module):
     def relprop(self, prev_rel, **kwargs):
         # Hila Chefer doesn't care about tanh (self.actiavtion not propagated)
         rel = self.dense.relprop(prev_rel, **kwargs)
-        rel = self.index_select.relprop(rel, **kwargs)
+        rel = self.index_select.relprop(rel, **kwargs, device=rel.device)
         return rel
 
 
@@ -457,8 +462,8 @@ class BertSelfAttention(torch.nn.Module):
         self.attention_head_size = int(config.hidden_size / config.num_attention_heads)
         self.all_head_size = self.num_attention_heads * self.attention_head_size
 
-        self.matmul1 = MatMul()
-        self.matmul2 = MatMul()
+        self.matmul1 = MatMul2()
+        self.matmul2 = MatMul2()
         self.mul = Mul()
         self.add = Add()
         self.cloneN = CloneN()
@@ -590,7 +595,7 @@ class BertSelfAttention(torch.nn.Module):
 
         # Normalize the attention scores to probabilities.
         # SANDORNOTE: This is the what we want to get the relevance of (post-softmax)
-        attention_probs = F.softmax(attention_scores, dim=-1).requires_grad_(True)
+        attention_probs = torch.nn.functional.softmax(attention_scores, dim=-1).requires_grad_(True)
         attention_probs.register_hook(self.save_attention_grad)
         attention_probs.requires_grad_(True)
         attention_probs.retain_grad()
