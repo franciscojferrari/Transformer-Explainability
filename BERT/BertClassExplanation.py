@@ -8,7 +8,7 @@ class BertForSequenceClassificationExplanator:
         self.bert_model = bert_model
         self.bert_model.eval()
 
-    def generate_explanation(self, normalize_scores=True, get_logits=False, **input):
+    def generate_explanation(self, normalize_scores=False, get_logits=False, **input):
         output = self.bert_model(**input)
         logits = output.logits.reshape(input["input_ids"].shape[0], self.bert_model.config.num_labels)
         one_hot = torch.nn.functional.one_hot(torch.argmax(logits, dim=1), self.bert_model.config.num_labels)
@@ -17,7 +17,7 @@ class BertForSequenceClassificationExplanator:
         backprop_me = (one_hot * logits).sum()
         backprop_me.backward(retain_graph=True)
         kwargs = {"alpha": 1}
-        self.bert_model.relevance_propagation(one_hot.to(input["input_ids"].device), **kwargs)
+        self.bert_model.relprop(one_hot.to(input["input_ids"].device), **kwargs)
         weighted_attention_relevance = None
         for attention_block in self.bert_model.bert.encoder.layer:
             rel = attention_block.attention.self.attention_relevance

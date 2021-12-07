@@ -175,13 +175,13 @@ class BertModel(BertPreTrainedModel):
             cross_attentions=encoder_outputs.cross_attentions,
         )
 
-    def relevance_propagation(self, prev_rel, **kwargs):
-        rel = self.pooler.relevance_propagation(prev_rel, **kwargs)
+    def relprop(self, prev_rel, **kwargs):
+        rel = self.pooler.relprop(prev_rel, **kwargs)
         assert torch.isclose(rel.sum(dim=list(range(1, rel.dim()))),
-                             torch.ones(rel.shape[0]).float()).all()
-        rel = self.encoder.relevance_propagation(rel, **kwargs)
+                             torch.ones(rel.shape[0], device=rel.device).float()).all()
+        rel = self.encoder.relprop(rel, **kwargs)
         assert torch.isclose(rel.sum(dim=list(range(1, rel.dim()))),
-                             torch.ones(rel.shape[0]).float()).all()
+                             torch.ones(rel.shape[0], device=rel.device).float()).all()
         return rel
 
 
@@ -202,10 +202,10 @@ class BertPooler(torch.nn.Module):
         pooled_output = self.activation(pooled_output)
         return pooled_output
 
-    def relevance_propagation(self, prev_rel, **kwargs):
+    def relprop(self, prev_rel, **kwargs):
         # Hila Chefer doesn't care about tanh (self.actiavtion not propagated)
-        rel = self.dense.relevance_propagation(prev_rel, **kwargs)
-        rel = self.index_select.relevance_propagation(rel, **kwargs)
+        rel = self.dense.relprop(prev_rel, **kwargs)
+        rel = self.index_select.relprop(rel, **kwargs)
         return rel
 
 
@@ -274,7 +274,7 @@ class BertEmbeddings(torch.nn.Module):
         embeddings = self.dropout(embeddings)
         return embeddings
 
-    def relevance_propagation(self, R):
+    def relprop(self, R):
         pass  # SANDORFIX
 
 
@@ -375,10 +375,10 @@ class BertEncoder(torch.nn.Module):
             cross_attentions=all_cross_attentions,
         )
 
-    def relevance_propagation(self, prev_rel, **kwargs):
+    def relprop(self, prev_rel, **kwargs):
         rel = prev_rel
         for i, layer_module in enumerate(reversed(self.layer)):
-            rel = layer_module.relevance_propagation(rel, **kwargs)
+            rel = layer_module.relprop(rel, **kwargs)
         return rel
 
 
@@ -432,15 +432,15 @@ class BertAttention(torch.nn.Module):
         outputs = (attention_output,) + self_outputs[1:]  # add attentions if we output them
         return outputs
 
-    def relevance_propagation(self, prev_rel, **kwargs):
-        (rel, rel_residual) = self.output.relevance_propagation(prev_rel, **kwargs)
+    def relprop(self, prev_rel, **kwargs):
+        (rel, rel_residual) = self.output.relprop(prev_rel, **kwargs)
         assert torch.isclose(rel.sum(dim=list(range(1, rel.dim()))) + rel_residual.sum(
             dim=list(range(1, rel_residual.dim()))), torch.ones(rel.shape[0]).float()).all()
         # self.self is for SelfAttention, weird naming scheme but whatever
-        rel = self.self.relevance_propagation(rel, **kwargs)
-        rel = self.clone.relevance_propagation((rel, rel_residual), **kwargs)
+        rel = self.self.relprop(rel, **kwargs)
+        rel = self.clone.relprop((rel, rel_residual), **kwargs)
         assert torch.isclose(rel.sum(dim=list(range(1, rel.dim()))),
-                             torch.ones(rel.shape[0]).float()).all()
+                             torch.ones(rel.shape[0], device=rel.device).float()).all()
         return rel
 
 
@@ -615,31 +615,31 @@ class BertSelfAttention(torch.nn.Module):
             outputs = outputs + (past_key_value,)
         return outputs
 
-    def relevance_propagation(self, prev_rel, **kwargs):
+    def relprop(self, prev_rel, **kwargs):
         # Hila chefer assumes we don't output output_attentions == False
         rel = self.transpose_for_scores(prev_rel)  # Undo permutation of context layer
 
-        (rel_attn_probs, rel_value) = self.matmul2.relevance_propagation(rel, **kwargs)
+        (rel_attn_probs, rel_value) = self.matmul2.relprop(rel, **kwargs)
         if self.head_mask is not None:
-            (rel_attn_probs, rel_head_mask) = self.mul.relevance_propagation(rel_attn_probs, **kwargs)
+            (rel_attn_probs, rel_head_mask) = self.mul.relprop(rel_attn_probs, **kwargs)
         self.attention_relevance = rel_attn_probs
 
         if self.attention_mask is not None:
-            (rel_attn_probs, rel_attention_mask) = self.add.relevance_propagation(rel_attn_probs, **kwargs)
+            (rel_attn_probs, rel_attention_mask) = self.add.relprop(rel_attn_probs, **kwargs)
 
-        (rel_query, rel_key) = self.matmul1.relevance_propagation(rel_attn_probs, **kwargs)
+        (rel_query, rel_key) = self.matmul1.relprop(rel_attn_probs, **kwargs)
 
-        rel_query = self.transpose_for_scores_query.relevance_propagation(rel_query, **kwargs)
-        rel_query = self.query.relevance_propagation(rel_query, **kwargs)
+        rel_query = self.transpose_for_scores_query.relprop(rel_query, **kwargs)
+        rel_query = self.query.relprop(rel_query, **kwargs)
 
-        rel_key = self.transpose_for_scores_key.relevance_propagation(
+        rel_key = self.transpose_for_scores_key.relprop(
             rel_key.transpose(-1, -2), **kwargs)
-        rel_key = self.key.relevance_propagation(rel_key, **kwargs)
+        rel_key = self.key.relprop(rel_key, **kwargs)
 
-        rel_value = self.transpose_for_scores_value.relevance_propagation(rel_value, **kwargs)
-        rel_value = self.value.relevance_propagation(rel_value, **kwargs)
+        rel_value = self.transpose_for_scores_value.relprop(rel_value, **kwargs)
+        rel_value = self.value.relprop(rel_value, **kwargs)
 
-        rel = self.cloneN.relevance_propagation((rel_query, rel_key, rel_value), **kwargs)
+        rel = self.cloneN.relprop((rel_query, rel_key, rel_value), **kwargs)
 
         return rel
 
@@ -658,9 +658,9 @@ class BertSelfOutput(torch.nn.Module):
         hidden_states = self.LayerNorm(self.skip((hidden_states, input_tensor)))
         return hidden_states
 
-    def relevance_propagation(self, prev_rel, **kwargs):
-        (rel, rel_residual) = self.skip.relevance_propagation(prev_rel, **kwargs)
-        rel = self.dense.relevance_propagation(rel, **kwargs)
+    def relprop(self, prev_rel, **kwargs):
+        (rel, rel_residual) = self.skip.relprop(prev_rel, **kwargs)
+        rel = self.dense.relprop(rel, **kwargs)
         return (rel, rel_residual)
 
 
@@ -679,9 +679,9 @@ class BertOutput(torch.nn.Module):
         hidden_states = self.LayerNorm(self.skip((hidden_states, input_tensor)))
         return hidden_states
 
-    def relevance_propagation(self, prev_rel, **kwargs):
-        (rel, rel_residual) = self.skip.relevance_propagation(prev_rel, **kwargs)
-        rel = self.dense.relevance_propagation(rel, **kwargs)
+    def relprop(self, prev_rel, **kwargs):
+        (rel, rel_residual) = self.skip.relprop(prev_rel, **kwargs)
+        rel = self.dense.relprop(rel, **kwargs)
         return (rel, rel_residual)
 
 
@@ -699,8 +699,8 @@ class BertIntermediate(torch.nn.Module):
         hidden_states = self.intermediate_act_fn(hidden_states)
         return hidden_states
 
-    def relevance_propagation(self, prev_rel, **kwargs):
-        rel = self.dense.relevance_propagation(prev_rel, **kwargs)
+    def relprop(self, prev_rel, **kwargs):
+        rel = self.dense.relprop(prev_rel, **kwargs)
         return rel
 
 
@@ -787,15 +787,15 @@ class BertLayer(torch.nn.Module):
 
         return outputs
 
-    def relevance_propagation(self, prev_rel, **kwargs):
+    def relprop(self, prev_rel, **kwargs):
         # --- Chunked ---
-        (rel, rel_residual) = self.output.relevance_propagation(prev_rel, **kwargs)
-        rel = self.intermediate.relevance_propagation(rel, **kwargs)
+        (rel, rel_residual) = self.output.relprop(prev_rel, **kwargs)
+        rel = self.intermediate.relprop(rel, **kwargs)
         # --- Chunked ---
         if self.is_decoder:
             pass  # Decoder is not used for classification
-        rel = self.clone.relevance_propagation((rel, rel_residual), **kwargs)
-        rel = self.attention.relevance_propagation(rel, **kwargs)
+        rel = self.clone.relprop((rel, rel_residual), **kwargs)
+        rel = self.attention.relprop(rel, **kwargs)
         return rel
 
     def feed_forward_chunk(self, attention_output):
@@ -895,13 +895,13 @@ class BertForSequenceClassification(BertPreTrainedModel):
             attentions=outputs.attentions,
         )
 
-    def relevance_propagation(self, prev_rel, **kwargs):
-        rel = self.classifier.relevance_propagation(prev_rel, **kwargs)
+    def relprop(self, prev_rel, **kwargs):
+        rel = self.classifier.relprop(prev_rel, **kwargs)
         assert torch.isclose(rel.sum(dim=list(range(1, rel.dim()))),
-                             torch.ones(rel.shape[0]).float()).all()
-        rel = self.bert.relevance_propagation(rel, **kwargs)
+                             torch.ones(rel.shape[0], device=rel.device).float()).all()
+        rel = self.bert.relprop(rel, **kwargs)
         assert torch.isclose(rel.sum(dim=list(range(1, rel.dim()))),
-                             torch.ones(rel.shape[0]).float()).all()
+                             torch.ones(rel.shape[0], device=rel.device).float()).all()
         return rel
 
 
@@ -922,6 +922,6 @@ if __name__ == "__main__":
     outputs = model(torch.Tensor(inputs["input_ids"]).int().unsqueeze(0))
     class_score = torch.nn.functional.softmax(outputs.logits, dim=1)
     class_preds = torch.argmax(class_score, dim=1)
-    rel = model.relevance_propagation(class_preds, alpha=1)
+    rel = model.relprop(class_preds, alpha=1)
 
     print("Done!")
