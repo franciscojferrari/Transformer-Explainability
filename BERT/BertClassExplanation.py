@@ -40,7 +40,7 @@ class BertForSequenceClassificationExplanator:
 
     def vizualize(self, explanations, tokens, pred, label, label_string, label_being_explained=1):
         for i in range(explanations.shape[0]):
-            print([(tokens[i].split()[j], explanations[i, j].item()) for j in range(len(tokens[i].split()))])
+            print([(tokens[i][j], explanations[i, j].item()) for j in range(len(tokens[i]))])
             vis_data_records = [visualization.VisualizationDataRecord(
                                             explanations[i].detach().numpy(),
                                             pred[i].item(),
