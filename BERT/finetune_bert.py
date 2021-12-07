@@ -64,12 +64,12 @@ class BertSequenceClassificationSystem(pl.LightningModule):
     def test_step(self, test_batch, test_batch_id):
         torch.set_grad_enabled(True)
         explanation, one_hot_pred, logits = self.explanator.generate_explanation(**test_batch, get_logits=True)
-        np.savetxt("BERT_explanations/{}.csv".format(test_batch_id), explanation.detach().numpy())
+        np.savetxt("BERT_explanations/{}.csv".format(test_batch_id), explanation.detach().cpu().numpy())
         class_pred = torch.argmax(one_hot_pred, dim=1)
         np.savetxt("BERT_preds/{}.csv".format(test_batch_id),
-                   class_pred.detach().numpy())
+                   class_pred.detach().cpu().numpy())
         np.savetxt("BERT_logits/{}.csv".format(test_batch_id),
-                   logits.detach().numpy())
+                   logits.detach().cpu().numpy())
         return None
 
     # def test_step_end(self, test_step_outputs):

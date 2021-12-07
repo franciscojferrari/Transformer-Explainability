@@ -22,7 +22,7 @@ class BertForSequenceClassificationExplanator:
         for attention_block in self.bert_model.bert.encoder.layer:
             rel = attention_block.attention.self.attention_relevance
             rel_grad = attention_block.attention.self.attention_grad
-            weighted_layer_attention_relevance = torch.eye(rel.shape[-1]) + (rel_grad * rel).clamp(min=0).mean(dim=1)
+            weighted_layer_attention_relevance = torch.eye(rel.shape[-1]).to(rel.device) + (rel_grad * rel).clamp(min=0).mean(dim=1)
             if weighted_attention_relevance is None:
                 weighted_attention_relevance = weighted_layer_attention_relevance.double()
             else:

@@ -11,11 +11,11 @@ def divide_add_epsilon(num, den, epsilon=1e-9):
         # Add epsilon to denominator
         den_eps = den + epsilon
         # Where denominator == -epsilon, add 2*epsilon instead
-        return num.view(view) / torch.where(den_eps == 0, torch.tensor(epsilon), den_eps).view(view)
+        return num.view(view) / torch.where(den_eps == 0, torch.tensor(epsilon).to(den_eps.device), den_eps).view(view)
     # Add epsilon to denominator
     den_eps = den + epsilon
     # Where denominator == -epsilon, add 2*epsilon instead
-    return num / torch.where(den_eps == 0, torch.tensor(epsilon), den_eps)
+    return num / torch.where(den_eps == 0, torch.tensor(epsilon).to(den_eps.device), den_eps)
 
 def backward_hook(module, grad_in, grad_out):
     module.grad_wrt_input = grad_in
@@ -79,10 +79,10 @@ class RelEpsilon(Rel):
 
 class RelAlphaBeta(Rel):
     def alpha_beta(self, module_input, prev_rel, retain_graph, alpha, beta):
-        pos_weights = torch.where(self.weight > 0, self.weight, torch.zeros(1, dtype=self.weight.dtype))
-        neg_weights = torch.where(self.weight < 0, self.weight, torch.zeros(1, dtype=self.weight.dtype))
-        pos_inputs = torch.where(module_input > 0, module_input, torch.zeros(1, dtype=module_input.dtype))
-        neg_inputs = torch.where(module_input < 0, module_input, torch.zeros(1, dtype=module_input.dtype))
+        pos_weights = torch.where(self.weight > 0, self.weight, torch.zeros(1, dtype=self.weight.dtype).to(self.weight.device))
+        neg_weights = torch.where(self.weight < 0, self.weight, torch.zeros(1, dtype=self.weight.dtype).to(self.weight.device))
+        pos_inputs = torch.where(module_input > 0, module_input, torch.zeros(1, dtype=module_input.dtype).to(module_input.device))
+        neg_inputs = torch.where(module_input < 0, module_input, torch.zeros(1, dtype=module_input.dtype).to(module_input.device))
 
         pos_pos = F.linear(pos_inputs, pos_weights).clamp(min=1e-9)
         pos_neg = F.linear(pos_inputs, neg_weights).clamp(min=1e-9)
@@ -111,20 +111,20 @@ class RelAlphaBeta(Rel):
 
 class RelGeLu(RelAlphaBeta):
     def alpha_beta(self, module_input, prev_rel, retain_graph, alpha, beta):
-        pos_weights = torch.where(self.weight > 0, self.weight, torch.zeros(1, dtype=self.weight.dtype))
-        neg_weights = torch.where(self.weight < 0, self.weight, torch.zeros(1, dtype=self.weight.dtype))
-        pos_inputs = torch.where(module_input > 0, module_input, torch.zeros(1, dtype=module_input.dtype))
-        neg_inputs = torch.where(module_input < 0, module_input, torch.zeros(1, dtype=module_input.dtype))
+        pos_weights = torch.where(self.weight > 0, self.weight, torch.zeros(1, dtype=self.weight.dtype).to(self.weight.device))
+        neg_weights = torch.where(self.weight < 0, self.weight, torch.zeros(1, dtype=self.weight.dtype).to(self.weight.device))
+        pos_inputs = torch.where(module_input > 0, module_input, torch.zeros(1, dtype=module_input.dtype).to(module_input.device))
+        neg_inputs = torch.where(module_input < 0, module_input, torch.zeros(1, dtype=module_input.dtype).to(module_input.device))
 
         pos_pos = F.linear(pos_inputs, pos_weights)
         pos_neg = F.linear(pos_inputs, neg_weights)
         neg_pos = F.linear(neg_inputs, pos_weights)
         neg_neg = F.linear(neg_inputs, neg_weights)
 
-        pos_pos = torch.where(pos_pos > 0, pos_pos, torch.zeros(1, dtype=self.weight.dtype)).clamp(min=1e-9)
-        pos_neg = torch.where(pos_neg > 0, pos_neg, torch.zeros(1, dtype=self.weight.dtype)).clamp(min=1e-9)
-        neg_pos = torch.where(neg_pos > 0, neg_pos, torch.zeros(1, dtype=self.weight.dtype)).clamp(min=1e-9)
-        neg_neg = torch.where(neg_neg > 0, neg_neg, torch.zeros(1, dtype=self.weight.dtype)).clamp(min=1e-9)
+        pos_pos = torch.where(pos_pos > 0, pos_pos, torch.zeros(1, dtype=self.weight.dtype).to(pos_pos.device)).clamp(min=1e-9)
+        pos_neg = torch.where(pos_neg > 0, pos_neg, torch.zeros(1, dtype=self.weight.dtype).to(pos_neg.device)).clamp(min=1e-9)
+        neg_pos = torch.where(neg_pos > 0, neg_pos, torch.zeros(1, dtype=self.weight.dtype).to(neg_pos.device)).clamp(min=1e-9)
+        neg_neg = torch.where(neg_neg > 0, neg_neg, torch.zeros(1, dtype=self.weight.dtype).to(neg_neg.device)).clamp(min=1e-9)
 
 
         pos_rel = \
@@ -278,14 +278,14 @@ class Add(RelEpsilon):
         module_output = self.forward(self.module_input)
         frac = divide_add_epsilon(prev_rel, module_output)
         grad = torch.autograd.grad(module_output, self.module_input, frac, retain_graph=True) # Remove if not debugging
-        grad_X_times_frac = torch.ones(X.shape) * frac
+        grad_X_times_frac = torch.ones(X.shape).to(frac.device) * frac
         if not grad_X_times_frac.shape == X.shape:
             dims = []
             for i in range(X.dim()):
                 if X.shape[i] < grad_X_times_frac.shape[i]:
                     dims.append(i)
             grad_X_times_frac = torch.sum(grad_X_times_frac, dim=dims, keepdim=True)
-        grad_Y_times_frac = torch.ones(Y.shape) * frac
+        grad_Y_times_frac = torch.ones(Y.shape).to(frac.device) * frac
         if not grad_Y_times_frac.shape == Y.shape:
             dims = []
             for i in range(Y.dim()):
