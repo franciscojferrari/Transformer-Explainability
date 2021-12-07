@@ -50,7 +50,7 @@ class ExplanationGenerator:
         one_hot.backward(retain_graph=True)
         # attn
         grad = self.model.blocks[-1].attn.get_attn_gradients()
-        cam = self.model.blocks[-1].attn.get_attention_map()
+        cam = self.model.blocks[-1].attn.get_attn()
         cam = cam[0, :, 0, 1:].reshape(-1, 14, 14)
         grad = grad[0, :, 0, 1:].reshape(-1, 14, 14)
         grad = grad.mean(dim=[1, 2], keepdim=True)

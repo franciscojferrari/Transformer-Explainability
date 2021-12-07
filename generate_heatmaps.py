@@ -118,7 +118,7 @@ def imagenet_dataloader(imagenet_validation_path: str, batch_size: int = 1):
         imagenet_ds,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=50,
+        num_workers=4,
         pin_memory=True
     )
     return sample_loader
