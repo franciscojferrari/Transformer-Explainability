@@ -138,9 +138,7 @@ def generate_heatmaps(args):
     attribution_generator = LRP(model)
     imagenet = imagenet_dataloader(args.imagenet_validation_path, args.batch_size)
 
-    results_path = os.path.join(args.save_path, args.vit_model)
-
-    compute_saliency_and_save(imagenet, results_path, attribution_generator, device)
+    compute_saliency_and_save(imagenet, args.save_path, attribution_generator, device)
 
 
 def main_test():
@@ -219,7 +217,8 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     args.imagenet_validation_path = os.path.join(args.work_path, "imgnet_val")
-    args.save_path = os.path.join(args.work_path, "results")
+    
+    args.save_path = os.path.join(args.work_path, "results", args.vit_model, args.method)
 
     assert args.vit_model == "ours" or args.vit_model == "paper", "please select ours or paper"
 
