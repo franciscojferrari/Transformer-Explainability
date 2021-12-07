@@ -125,7 +125,7 @@ def imagenet_dataloader(imagenet_validation_path: str, batch_size: int = 1):
 @logger.timed
 def generate_heatmaps(args):
     cuda = torch.cuda.is_available()
-    device = torch.device("cuda:1" if cuda else "cpu")
+    device = torch.device("cuda:0" if cuda else "cpu")
 
     if args.vit_model == "ours":
         logger.logger.debug("Using OUR ViT")

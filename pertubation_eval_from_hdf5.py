@@ -154,7 +154,7 @@ def pertturbation_eval(args):
     torch.multiprocessing.set_start_method('spawn')
 
     cuda = torch.cuda.is_available()
-    device = torch.device("cuda:1" if cuda else "cpu")
+    device = torch.device("cuda:0" if cuda else "cpu")
 
     imagenet_ds = ImagenetResults(args.vis_method_dir)
 
