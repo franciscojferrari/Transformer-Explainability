@@ -7,7 +7,7 @@ import torch
 import numpy as np
 import cv2
 from tqdm import tqdm
-from attribution_generators.ViT_explanation_generator import LRP
+from attribution_generators.ViT_explanation_generator import ExplanationGenerator
 import h5py
 import os
 from torchvision.datasets import ImageNet
@@ -48,7 +48,7 @@ def generate_visualization(original_image, attribution_generator, class_index=No
     return vis
 
 
-def compute_saliency_and_save(images, path, lrp, device):
+def compute_saliency_and_save(images, path, expl_gen, device):
     first = True
 
     try:
@@ -92,9 +92,11 @@ def compute_saliency_and_save(images, path, lrp, device):
             data.requires_grad_()
 
             index = None
-
-            Res = lrp.generate_LRP(
-                data, start_layer=1, method=args.method, index=index, device=device)
+            if args.method == 'attn_gradcam':
+                Res = lrp
+            else:
+                Res = lrp.generate_LRP(
+                    data, start_layer=1, method=args.method, index=index, device=device)
 
             Res = (Res - Res.min()) / (Res.max() - Res.min())
 
@@ -135,7 +137,7 @@ def generate_heatmaps(args):
         model = paper_vit_base_patch16_224().to(device)
 
     model.eval()
-    attribution_generator = LRP(model)
+    attribution_generator = ExplanationGenerator(model)
     imagenet = imagenet_dataloader(args.imagenet_validation_path, args.batch_size)
 
     compute_saliency_and_save(imagenet, args.save_path, attribution_generator, device)
@@ -157,7 +159,7 @@ def main_test():
     # model = vit_base_patch16_224().to(device)
     model = our_vit_base_patch16_224().to(device)
     model.eval()
-    attribution_generator = LRP(model)
+    attribution_generator = ExplanationGenerator(model)
     image = Image.open('samples/catdog.png')
     dog_cat_image = transform(image)
 
@@ -217,7 +219,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     args.imagenet_validation_path = os.path.join(args.work_path, "imgnet_val")
-    
+
     args.save_path = os.path.join(args.work_path, "results", args.vit_model, args.method)
     os.makedirs(args.save_path, exist_ok=True)
 
