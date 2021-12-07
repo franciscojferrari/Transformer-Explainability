@@ -93,9 +93,9 @@ def compute_saliency_and_save(images, path, expl_gen, device):
 
             index = None
             if args.method == 'attn_gradcam':
-                Res = lrp
+                Res = expl_gen.generate_cam_attn(data,  index=index, device=device)
             else:
-                Res = lrp.generate_LRP(
+                Res = expl_gen.generate_LRP(
                     data, start_layer=1, method=args.method, index=index, device=device)
 
             Res = (Res - Res.min()) / (Res.max() - Res.min())
