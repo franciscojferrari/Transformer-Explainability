@@ -121,10 +121,10 @@ class RelGeLu(RelAlphaBeta):
         neg_pos = F.linear(neg_inputs, pos_weights)
         neg_neg = F.linear(neg_inputs, neg_weights)
 
-        pos_pos = torch.where(pos_pos > 0, pos_pos, torch.zeros(1, dtype=self.weight.dtype).to(pos_pos.device)).clamp(min=1e-9)
-        pos_neg = torch.where(pos_neg > 0, pos_neg, torch.zeros(1, dtype=self.weight.dtype).to(pos_neg.device)).clamp(min=1e-9)
-        neg_pos = torch.where(neg_pos > 0, neg_pos, torch.zeros(1, dtype=self.weight.dtype).to(neg_pos.device)).clamp(min=1e-9)
-        neg_neg = torch.where(neg_neg > 0, neg_neg, torch.zeros(1, dtype=self.weight.dtype).to(neg_neg.device)).clamp(min=1e-9)
+        pos_pos = torch.where(pos_pos > 0, pos_pos, torch.zeros(1, dtype=self.weight.dtype).to(module_input.device)).clamp(min=1e-9)
+        pos_neg = torch.where(pos_neg > 0, pos_neg, torch.zeros(1, dtype=self.weight.dtype).to(module_input.device)).clamp(min=1e-9)
+        neg_pos = torch.where(neg_pos > 0, neg_pos, torch.zeros(1, dtype=self.weight.dtype).to(module_input.device)).clamp(min=1e-9)
+        neg_neg = torch.where(neg_neg > 0, neg_neg, torch.zeros(1, dtype=self.weight.dtype).to(module_input.device)).clamp(min=1e-9)
 
 
         pos_rel = \
@@ -176,7 +176,7 @@ class IndexSelect(torch.nn.Module):
     # The index itself as a torch.Tensor
     def forward(self, inputs, dim, indices):
         self.module_input = [inputs, dim, indices] 
-        return torch.index_select(inputs, dim, indices.to(inputs.device))
+        return torch.index_select(inputs, dim, indices)
 
     def relevance_propagation(self, prev_rel, **kwargs):
         output = torch.index_select(*self.module_input)
@@ -285,7 +285,7 @@ class Add(RelEpsilon):
                 if X.shape[i] < grad_X_times_frac.shape[i]:
                     dims.append(i)
             grad_X_times_frac = torch.sum(grad_X_times_frac, dim=dims, keepdim=True)
-        grad_Y_times_frac = torch.ones(Y.shape).to(frac.device) * frac
+        grad_Y_times_frac = torch.ones(Y.shape).to(frac.device)  * frac
         if not grad_Y_times_frac.shape == Y.shape:
             dims = []
             for i in range(Y.dim()):

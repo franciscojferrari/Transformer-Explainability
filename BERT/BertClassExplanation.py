@@ -40,13 +40,9 @@ class BertForSequenceClassificationExplanator:
 
     def vizualize(self, explanations, tokens, pred, label, label_string, label_being_explained=1):
         for i in range(explanations.shape[0]):
-            # for j in range(0, explanations.shape[1]):
-            #     if not(tokens[j] == "[PAD]") and not(tokens[j] == "[CLS]"):
-            #         print((tokens[j], explanations[i, j].item()))
-            mult = torch.max(explanations[i])
-            print([(tokens[i][j], explanations[i, j].item()) for j in range(len(tokens[i].split()))])
+            print([(tokens[i].split()[j], explanations[i, j].item()) for j in range(len(tokens[i].split()))])
             vis_data_records = [visualization.VisualizationDataRecord(
-                                            ((1/mult) * explanations[i, :len(tokens[i].split())]).detach().numpy(),
+                                            explanations[i].detach().numpy(),
                                             pred[i].item(),
                                             label_string[pred[i].item()],
                                             label_string[label[i].item()],
@@ -57,23 +53,22 @@ class BertForSequenceClassificationExplanator:
             visualization.visualize_text(vis_data_records)
 
 if __name__ == "__main__":
-    # huggingface_model_name = "textattack/bert-base-uncased-SST-2"
-    huggingface_model_name = "/home/sandor/Master/DD2412 Deep Learning, Advanced Course/Transformer-Explainability/BertForSequenceClassification"
+    huggingface_model_name = "textattack/bert-base-uncased-SST-2"
+    # huggingface_model_name = "/home/sandor/Master/DD2412 Deep Learning, Advanced Course/Transformer-Explainability/BertForSequenceClassification"
 
     from transformers import AutoTokenizer
     tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
 
     inputs = tokenizer(
-        ["This movie was the best movie I have ever seen! some scenes were ridiculous, but acting was great.",
-        "This movie is utter shit"], 
+        ["This movie was the best movie I have ever seen! some scenes were ridiculous, but acting was great."],
         return_tensors="pt", padding="max_length", truncation=True)
-    # tokens = [tokenizer.convert_ids_to_tokens(inputs["input_ids"][i]) for i in range(inputs["input_ids"].shape[0])]
-    tokens = ["This movie was the best movie I have ever seen! some scenes were ridiculous, but acting was great.",
-        "This movie is utter shit"]
+    tokens = [tokenizer.convert_ids_to_tokens(inputs["input_ids"][i]) for i in range(inputs["input_ids"].shape[0])]
+    # tokens = ["This movie was the best movie I have ever seen! some scenes were ridiculous, but acting was great.", "This movie is utter shit"]
 
     model = BertForSequenceClassification.from_pretrained(huggingface_model_name, num_labels=2)
     print("Using activation func: ", model.config.hidden_act)
     explanator = BertForSequenceClassificationExplanator(model)
     exp, pred = explanator.generate_explanation(**inputs)
     explanator.vizualize(exp, tokens, torch.argmax(pred,dim=1), torch.tensor([1, 0]), ["NEG", "POS"])
-    pass
+    # Notebook example
+    # [('[CLS]', 0.0), ('this', 0.4398406744003296), ('movie', 0.3385171890258789), ('was', 0.2850261628627777), ('the', 0.3722951412200928), ('best', 0.6413642764091492), ('movie', 0.3098682463169098), ('i', 0.20284101366996765), ('have', 0.12214731425046921), ('ever', 0.15835356712341309), ('seen', 0.2082878053188324), ('!', 0.6001579761505127), ('some', 0.021879158914089203), ('scenes', 0.05488050356507301), ('were', 0.0371897891163826), ('ridiculous', 0.03780526667833328), (',', 0.02076297625899315), ('but', 0.44531309604644775), ('acting', 0.45006945729255676), ('was', 0.5168584585189819), ('great', 1.0), ('.', 0.035734280943870544), ('[SEP]', 0.10382220149040222)]
