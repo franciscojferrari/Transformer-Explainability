@@ -219,6 +219,7 @@ if __name__ == "__main__":
     args.imagenet_validation_path = os.path.join(args.work_path, "imgnet_val")
     
     args.save_path = os.path.join(args.work_path, "results", args.vit_model, args.method)
+    os.makedirs(args.save_path, exist_ok=True)
 
     assert args.vit_model == "ours" or args.vit_model == "paper", "please select ours or paper"
 
