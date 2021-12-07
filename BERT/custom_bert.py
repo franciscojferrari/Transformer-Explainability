@@ -440,9 +440,11 @@ class BertAttention(torch.nn.Module):
     def relprop(self, prev_rel, **kwargs):
         (rel, rel_residual) = self.output.relprop(prev_rel, **kwargs)
         assert torch.isclose(rel.sum(dim=list(range(1, rel.dim()))) + rel_residual.sum(
-            dim=list(range(1, rel_residual.dim()))), torch.ones(rel.shape[0]).float()).all()
+            dim=list(range(1, rel_residual.dim()))), torch.ones(rel.shape[0], device=rel.device).float()).all()
         # self.self is for SelfAttention, weird naming scheme but whatever
         rel = self.self.relprop(rel, **kwargs)
+        assert torch.isclose(rel.sum(dim=list(range(1, rel.dim()))) + rel_residual.sum(
+            dim=list(range(1, rel_residual.dim()))), torch.ones(rel.shape[0], device=rel.device).float()).all()
         rel = self.clone.relprop((rel, rel_residual), **kwargs)
         assert torch.isclose(rel.sum(dim=list(range(1, rel.dim()))),
                              torch.ones(rel.shape[0], device=rel.device).float()).all()
