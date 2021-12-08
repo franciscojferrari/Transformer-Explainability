@@ -27,6 +27,8 @@ def eval(model, imagenet_ds, sample_loader, device, args):
     dissimilarity_model = np.zeros((len(imagenet_ds,)))
     model_index = 0
 
+    print(len(imagenet_ds))
+
     if args.scale == 'per':
         base_size = 224 * 224
         perturbation_steps = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
@@ -80,7 +82,8 @@ def eval(model, imagenet_ds, sample_loader, device, args):
         org_shape = data.shape
 
         if args.neg:
-            vis = -vis
+            pass
+            #vis = -vis
 
         vis = vis.reshape(org_shape[0], -1)
 
@@ -142,12 +145,8 @@ def eval(model, imagenet_ds, sample_loader, device, args):
     print("num_correct_model: ", np.mean(num_correct_model), np.std(num_correct_model))
     print("dissimilarity_model: ", np.mean(dissimilarity_model), np.std(dissimilarity_model))
     print("perturbation_steps: ", perturbation_steps)
-    print("num_correct_pertub: ", np.mean(num_correct_pertub, axis=1),
-          np.std(num_correct_pertub, axis=1))
-
-    print("num_correct_pertub_original_prediction: ", np.mean(
-        num_correct_pertub_original_prediction, axis=1),
-        np.std(num_correct_pertub_original_prediction, axis=1))
+    print("num_correct_pertub: ", np.mean(num_correct_pertub, axis=1), np.sum(num_correct_pertub, axis=1))
+    print("num_correct_pertub_original_prediction: ", np.mean(num_correct_pertub_original_prediction, axis=1), np.sum(num_correct_pertub_original_prediction, axis=1))
     # print(np.mean(dissimilarity_pertub, axis=1), np.std(dissimilarity_pertub, axis=1))
 
 def pertturbation_eval(args):

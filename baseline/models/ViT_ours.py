@@ -396,14 +396,22 @@ class VisionTransformer(nn.Module):
             cam = compute_rollout_attention(attn_cams, start_layer=start_layer)
             cam = cam[:, 0, 1:]
             return cam
-
-        # Partial LRP? previously "full"
-        if method == "partial_lrp":
+        
+        # Full LRP
+        if method == "lrp":
             (cam, _) = self.add.relprop(cam, **kwargs)
             cam = cam[:, 1:]
             cam = self.patch_embed.relprop(cam, **kwargs)
             # sum on channels
             cam = cam.sum(dim=1)
+            return cam
+
+        # Partial LRP: only consider last layer attention   
+        elif method == "partial_lrp":
+            cam = self.blocks[-1].attn.get_attn()
+            cam = cam[0].reshape(-1, cam.shape[-1], cam.shape[-1])
+            cam = cam.clamp(min=0).mean(dim=0)
+            cam = cam[0, 1:]
             return cam
 
         # Our method
