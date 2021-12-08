@@ -1,5 +1,6 @@
 from baseline.models.ViT_paper import vit_base_patch16_224 as paper_vit_base_patch16_224
 from baseline.models.ViT_ours import vit_base_patch16_224 as our_vit_base_patch16_224
+from baseline.models.ViT_original import vit_base_patch16_224 as original_base_model
 from PIL import Image
 import torchvision.transforms as transforms
 import matplotlib.pyplot as plt
@@ -7,7 +8,7 @@ import torch
 import numpy as np
 import cv2
 from tqdm import tqdm
-from attribution_generators.ViT_explanation_generator import LRP
+from attribution_generators.ViT_explanation_generator import LRP, RISE
 import h5py
 import os
 from torchvision.datasets import ImageNet
@@ -48,7 +49,7 @@ def generate_visualization(original_image, attribution_generator, class_index=No
     return vis
 
 
-def compute_saliency_and_save(images, path, lrp, device):
+def compute_saliency_and_save(images, path, lrp, rise, device):
     first = True
 
     try:
@@ -73,6 +74,7 @@ def compute_saliency_and_save(images, path, lrp, device):
                                        dtype=np.int32,
                                        compression="gzip")
         for batch_idx, (data, target) in enumerate(tqdm(images)):
+            
             if first:
                 first = False
                 data_cam.resize(data_cam.shape[0] + data.shape[0] - 1, axis=0)
@@ -92,9 +94,11 @@ def compute_saliency_and_save(images, path, lrp, device):
             data.requires_grad_()
 
             index = None
-
-            Res = lrp.generate_LRP(
-                data, start_layer=1, method=args.method, index=index, device=device)
+            
+            if args.method == 'rise':
+                Res = rise(data)
+            else:
+                Res = lrp.generate_LRP(data, start_layer=1, method=args.method, index=index, device=device)
 
             Res = (Res - Res.min()) / (Res.max() - Res.min())
 
@@ -130,17 +134,25 @@ def generate_heatmaps(args):
     if args.vit_model == "ours":
         #logger.logger.debug("Using OUR ViT")
         model = our_vit_base_patch16_224().to(device)
+    elif args.vit_model == "original":
+        model = original_base_model().to(device)
     else:
         #logger.logger.debug("Using PAPER ViT")
         model = paper_vit_base_patch16_224().to(device)
 
     model.eval()
     attribution_generator = LRP(model)
+
+    rise = None
+    if args.method == 'rise':
+        rise = RISE(model, (224, 224), device)
+        rise.generate_masks(N=2000,s=8, p1=0.5)
+
     imagenet = imagenet_dataloader(args.imagenet_validation_path, args.batch_size)
 
     #results_path = os.path.join(args.method_dir, args.vit_model)
 
-    compute_saliency_and_save(imagenet, args.method_dir, attribution_generator, device)
+    compute_saliency_and_save(imagenet, args.method_dir, attribution_generator, rise, device)
 
 
 def main_test():
@@ -238,7 +250,7 @@ if __name__ == "__main__":
     os.makedirs(os.path.join(PATH, 'visualizations/my_results'), exist_ok=True)
     args.method_dir = os.path.join(PATH, 'visualizations/my_results')
 
-    assert args.vit_model == "ours" or args.vit_model == "paper", "please select ours or paper"
+    assert args.vit_model == "ours" or args.vit_model == "paper" or args.vit_model == "original", "please select ours or paper"
 
     generate_heatmaps(args)
 

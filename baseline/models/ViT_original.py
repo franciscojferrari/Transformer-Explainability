@@ -8,12 +8,35 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from baseline.layers.layer_helper import to_2tuple
+from baseline.layers.layer_helper import to_2tuple, trunc_normal_
 # from timm.data import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD, IMAGENET_INCEPTION_MEAN, IMAGENET_INCEPTION_STD
 # from ..helpers import build_model_with_cfg, named_apply, adapt_input_conv
-# from .layers import PatchEmbed, trunc_normal_, lecun_normal_
 # from .registry import register_model
+import torch.utils.model_zoo as model_zoo
 
+def _cfg(url='', **kwargs):
+    return {
+        'url': url,
+        'num_classes': 1000, 'input_size': (3, 224, 224), 'pool_size': None,
+        'crop_pct': .9, 'interpolation': 'bicubic',
+        'first_conv': '.proj', 'classifier': 'head',
+        **kwargs
+    }
+
+
+default_cfgs = {
+    # patch models
+    'vit_small_patch16_224': _cfg(
+        url='https://github.com/rwightman/pytorch-image-models/releases/download/v0.1-weights/vit_small_p16_224-15ec54c9.pth',
+    ),
+    'vit_base_patch16_224': _cfg(
+        url='https://github.com/rwightman/pytorch-image-models/releases/download/v0.1-vitjx/jx_vit_base_p16_224-80ecf9dd.pth',
+        mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5),
+    ),
+    'vit_large_patch16_224': _cfg(
+        url='https://github.com/rwightman/pytorch-image-models/releases/download/v0.1-vitjx/jx_vit_large_p16_224-4ee7a4dc.pth',
+        mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),
+}
 
 class Mlp(nn.Module):
     """ MLP as used in Vision Transformer, MLP-Mixer and related networks
@@ -485,3 +508,39 @@ def _create_vision_transformer(variant, pretrained=False, default_cfg=None, **kw
         pretrained_custom_load='npz' in default_cfg['url'],
         **kwargs)
     return model
+
+def vit_base_patch16_224(pretrained=True, **kwargs):
+    model = VisionTransformer(
+        patch_size=16, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=True, **kwargs)
+    model.default_cfg = default_cfgs['vit_base_patch16_224']
+    if pretrained:
+        load_pretrained(model, num_classes=model.num_classes,
+                        in_chans=kwargs.get('in_chans', 3), filter_fn=_conv_filter)
+    return model
+
+def load_pretrained(model, cfg=None, num_classes=1000, in_chans=3, filter_fn=None, strict=True):
+    if cfg is None:
+        cfg = getattr(model, 'default_cfg')
+    if cfg is None or 'url' not in cfg or not cfg['url']:
+        _logger.warning("Pretrained model URL is invalid, using random initialization.")
+        return
+
+    state_dict = model_zoo.load_url(cfg['url'], progress=False, map_location='cpu')
+
+    if filter_fn is not None:
+        state_dict = filter_fn(state_dict)
+
+    assert in_chans == 3, "Channel diff than 3 not supported"
+    assert num_classes == cfg['num_classes'], "num_classes has to be the same as config"
+
+    model.load_state_dict(state_dict, strict=strict)
+
+
+def _conv_filter(state_dict, patch_size=16):
+    """ convert patch embedding weight from manual patchify + linear proj to conv"""
+    out_dict = {}
+    for k, v in state_dict.items():
+        if 'patch_embed.proj.weight' in k:
+            v = v.reshape((v.shape[0], 3, patch_size, patch_size))
+        out_dict[k] = v
+    return out_dict

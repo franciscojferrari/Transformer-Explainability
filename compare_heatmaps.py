@@ -1,5 +1,6 @@
 from baseline.models.ViT_paper import vit_base_patch16_224 as paper_base_model
 from baseline.models.ViT_ours import vit_base_patch16_224 as our_base_model
+from baseline.models.ViT_original import vit_base_patch16_224 as original_base_model
 from PIL import Image
 import torchvision.transforms as transforms
 import matplotlib.pyplot as plt
@@ -11,6 +12,7 @@ from attribution_generators.ViT_explanation_generator import LRP
 import h5py
 import os
 import time
+from attribution_generators.rise import RISE
 
 
 
@@ -1088,6 +1090,16 @@ def main():
     image = Image.open('samples/catdog.png')
     dog_cat_image = transform(image)
 
+    '''
+    # this is to generate a heatmap with RISE
+    model = original_base_model().to(device)
+    model.eval()    
+    rise = RISE(model, input_size=(224, 224), device=device, gpu_batch=100)
+    rise.generate_masks(N=2000, s=8, p1=0.5)
+    #heatmap_rise = rise(dog_cat_image.unsqueeze(0).to(device), class_idx=243)
+    heatmap_rise = rise(dog_cat_image.unsqueeze(0).to(device))
+
+    '''
     raw_attr_paper = gen_raw_attr(paper_base_model, dog_cat_image, device, model_name='Original paper implementation')
     raw_attr_ours = gen_raw_attr(our_base_model, dog_cat_image, device, model_name='Our implementation')
 
@@ -1098,26 +1110,32 @@ def main():
 
     heatmap_paper = get_heatmap(raw_attr_paper)
     heatmap_ours = get_heatmap(raw_attr_ours)
-    max_attr = np.maximum(raw_attr_paper.max(), raw_attr_ours.max())
-    heatmap_diff = get_heatmap(np.abs(raw_attr_paper - raw_attr_ours), max_=max_attr)
-    heatmap_diff_augmented = get_heatmap(np.abs(raw_attr_paper - raw_attr_ours))
+    #max_attr = np.maximum(raw_attr_paper.max(), raw_attr_ours.max())
+    #heatmap_diff = get_heatmap(np.abs(raw_attr_paper - raw_attr_ours), max_=max_attr)
+    #heatmap_diff_augmented = get_heatmap(np.abs(raw_attr_paper - raw_attr_ours))
+    
 
     fig, axs = plt.subplots(1, 5)
     axs[0].imshow(image)
     axs[0].axis('off')
     axs[0].title.set_text('Original image')
+    #axs[1].imshow(heatmap_rise)
+    #axs[1].axis('off')
+    
     axs[1].imshow(heatmap_paper)
     axs[1].axis('off')
     axs[1].title.set_text('Paper\'s heatmap')
     axs[2].imshow(heatmap_ours)
     axs[2].axis('off')  
     axs[2].title.set_text('Our heatmap')  
+    '''
     axs[3].imshow(heatmap_diff)
     axs[3].axis('off')
     axs[3].title.set_text('Heatmap diff')
     axs[4].imshow(heatmap_diff_augmented)
     axs[4].axis('off')
     axs[4].title.set_text('Heatmap diff augmented %.6f' % max_attr)
+    '''
     plt.show()
 
 

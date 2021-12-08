@@ -4,41 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from skimage.transform import resize
 from tqdm import tqdm
-
-class LRP:
-    def __init__(self, model):
-        self.model = model
-        self.model.eval()
-
-    def generate_LRP(
-            self, input, index=None, method="transformer_attribution", is_ablation=False,
-            start_layer=0, device="cuda"):
-        output = self.model(input)
-        kwargs = {"alpha": 1}
-        if index == None:
-            index = np.argmax(output.cpu().data.numpy(), axis=-1)
-
-        one_hot = np.zeros((1, output.size()[-1]), dtype=np.float32)
-        one_hot[0, index] = 1
-        one_hot_vector = one_hot
-        one_hot = torch.from_numpy(one_hot).requires_grad_(True)
-        one_hot = torch.sum(one_hot.to(device) * output)
-
-        self.model.zero_grad()
-        one_hot.backward(retain_graph=True)
-
-        R = self.model.relprop(torch.tensor(one_hot_vector).to(device),method=method, 
-            is_ablation=is_ablation, start_layer=start_layer,
-            device=device, **kwargs)
-
-        if method == 'lrp':
-            R = R.reshape(input.shape[0], 1, 224, 224)
-        else:
-            R = R.reshape(input.shape[0], 1, 14, 14)
-            R = torch.nn.functional.interpolate(R, scale_factor=16, mode='bilinear').to(device)
-
-        return R
-
+import pdb
 
 class RISE(nn.Module):
     def __init__(self, model, input_size, device, gpu_batch=100):
@@ -74,15 +40,14 @@ class RISE(nn.Module):
         N = self.N
         _, _, H, W = x.size()
 
-        with torch.no_grad():
-            if class_idx is None:
-                pred = self.model(x.data)
-                class_idx = torch.argmax(pred).item()
+        if class_idx is None:
+            pred = self.model(x.data)
+            class_idx = torch.argmax(pred).item()
 
         # DM: for each mask, do inference and then update with the class probability
         sal = torch.zeros((H, W)).to(self.device)
         with torch.no_grad():
-            for n in range(0, N, self.gpu_batch):
+            for n in tqdm(range(0, N, self.gpu_batch)):
                 masks_ = self.masks[n:min(n + self.gpu_batch, N)]               # (B, 1, H, W)
                 masked_img = torch.mul(masks_, x.data)                          # (B, C, H, W)
                 logits = self.model(masked_img)                                 # (B, 1000)
@@ -91,4 +56,4 @@ class RISE(nn.Module):
                 sal += weighted_masks.sum(axis=0)                               # (H, W)
             
         sal = sal / N / self.p1
-        return sal.squeeze()
+        return sal.squeeze().cpu().detach().numpy()
