@@ -21,7 +21,8 @@ def proccess_predictions(explanations_folder, docids, k_list=range(10, 80+10, 10
     file_names = os.listdir(explanations_folder)
     file_names.sort(key=lambda x: int(x[:-4]))
     docids = list(docids)
-    docids.sort(key=lambda x: int(x[5:8]))
+    doclen = len(docids)
+    docids.sort(key=lambda x: int(x[5:8]) if "neg" in x else int(x[5:8]) + doclen)
     for i, file_name in enumerate(file_names):
         expl = np.loadtxt(os.path.join(explanations_folder, file_name), delimiter=" ")
         for j, k in enumerate(k_list):
@@ -38,23 +39,17 @@ def make_rationales_hard(soft_rationale_list):
             hard_rationale_list.append(Rationale(soft_rationale.ann_id, soft_rationale.docid, token, token+1))
     return hard_rationale_list
 
-def json_format_dict(explanations_folder="BERT_explanations", k_list=range(10, 80+10, 10), class_names=["NEG", "POS"]):
-    try:
-        os.mkdir("BERT/BERT_annotations/")
-    except FileExistsError:
-        pass
+def json_format_dict(explanations_folder, docids, k_list=range(10, 80+10, 10), class_names=["NEG", "POS"]):
     rationales_list = [[] for _ in range(len(k_list))]
     file_names = os.listdir(explanations_folder)
     file_names.sort(key=lambda x: int(x[:-4]))
+    docids = list(docids)
+    doclen = len(docids)
+    docids.sort(key=lambda x: int(x[5:8]) if "neg" in x else int(x[5:8]) + doclen)
     for i, file_name in enumerate(file_names):
         expl = np.loadtxt(os.path.join(explanations_folder, file_name), delimiter=" ")
         for j, k in enumerate(k_list):
-            if i < 800:
-                id = "negR_{0:03}.txt".format(i)
-            else:
-                id = "posR_{0:03}.txt".format(i-800)
-            if id == "negR_506.txt":
-                continue
+            id = docids[i]
             rationale_tokens = (-expl).argsort()[:k]
             hard_rationale_predictions = []
             for rationale_token in rationale_tokens.tolist():
@@ -99,7 +94,7 @@ if __name__ == "__main__":
         print("K={}: {}".format(k_list[i], score))
     np.savetxt("f1_micro_scores.csv", f1_micro_scores, delimiter=",")
     np.savetxt("f1_macro_scores.csv", f1_macro_scores, delimiter=",")
-    pred = json_format_dict()
+    pred = json_format_dict(args.bert_explanations_dir, docids)
     try:
         os.mkdir("BERT/BERT_json_res")
     except FileExistsError:

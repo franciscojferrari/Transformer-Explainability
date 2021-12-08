@@ -6,8 +6,6 @@ from transformers.models.bert.modeling_bert import BertPreTrainedModel
 from transformers.modeling_outputs import BaseModelOutputWithPoolingAndCrossAttentions, BaseModelOutputWithPastAndCrossAttentions, SequenceClassifierOutput
 from transformers.activations import ACT2FN
 
-from custom_layer import *
-
 from packaging import version
 import math
 
@@ -17,10 +15,11 @@ from transformers.modeling_utils import (
     prune_linear_layer,
 )
 
-from custom_layer import TransposeForScores
-from custom_layer import CloneN
-from custom_layer import Clone
-from custom_layer import Mul
+from BERT.custom_layer import *
+from BERT.custom_layer import TransposeForScores
+from BERT.custom_layer import CloneN
+from BERT.custom_layer import Clone
+from BERT.custom_layer import Mul
 
 # Base model of BERT gotten from huggingfaces: https://github.com/huggingface/transformers/blob/master/src/transformers/models/bert/modeling_bert.py
 

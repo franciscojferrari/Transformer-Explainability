@@ -1,5 +1,5 @@
 from torch.nn.functional import one_hot
-from custom_bert import BertForSequenceClassification
+from BERT.custom_bert import BertForSequenceClassification
 import torch
 from captum.attr import visualization
 
