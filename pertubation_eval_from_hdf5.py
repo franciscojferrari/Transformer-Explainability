@@ -154,7 +154,7 @@ def pertturbation_eval(args):
     torch.multiprocessing.set_start_method('spawn')
 
     cuda = torch.cuda.is_available()
-    device = torch.device("cuda:1" if cuda else "cpu")
+    device = torch.device("cuda:0" if cuda else "cpu")
 
     imagenet_ds = ImagenetResults(args.vis_method_dir)
 
@@ -168,7 +168,7 @@ def pertturbation_eval(args):
     sample_loader = torch.utils.data.DataLoader(
         imagenet_ds,
         batch_size=args.batch_size,
-        num_workers=40,
+        num_workers=4,
         shuffle=False)
 
     eval(model, imagenet_ds, sample_loader, device, args)
@@ -201,6 +201,11 @@ if __name__ == "__main__":
                         default="ours",
                         help='ours or paper')
 
+    parser.add_argument('--method', type=str,
+                        # required=True,
+                        default="transformer_attribution",
+                        help='')
+
     args = parser.parse_args()
 
     os.makedirs(os.path.join(args.work_path, 'experiments'), exist_ok=True)
@@ -208,7 +213,7 @@ if __name__ == "__main__":
 
     exp_name = 'neg_per' if args.neg else 'pos_per'
     args.runs_dir = os.path.join(
-        args.work_path, 'experiments/perturbations/{}/{}'.format(args.vit_model, exp_name))
+        args.work_path, 'experiments/perturbations/{}/{}/{}'.format(args.vit_model, args.method, exp_name))
 
     if args.wrong:
         args.runs_dir += '_wrong'
@@ -218,5 +223,6 @@ if __name__ == "__main__":
     args.experiment_dir = os.path.join(args.runs_dir, 'experiment_{}'.format(str(experiment_id)))
     os.makedirs(args.experiment_dir, exist_ok=True)
 
-    args.vis_method_dir = os.path.join(args.work_path, "results", args.vit_model)
+    args.vis_method_dir = os.path.join(args.work_path, "results", args.vit_model, args.method)
+
     pertturbation_eval(args)

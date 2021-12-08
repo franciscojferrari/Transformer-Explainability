@@ -8,7 +8,7 @@ import torch
 import numpy as np
 import cv2
 import pdb
-from attribution_generators.ViT_explanation_generator import LRP
+from attribution_generators.ViT_explanation_generator import ExplanationGenerator
 import h5py
 import os
 import time
@@ -1046,7 +1046,7 @@ def normalize(tensor, mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]):
 def gen_raw_attr(base_model, image, device, model_name=None):
     model = base_model().to(device)
     model.eval()
-    attr_gen = LRP(model)
+    attr_gen = ExplanationGenerator(model)
 
     output = model(image.unsqueeze(0).to(device))
     print_top_classes(output)

@@ -8,7 +8,7 @@ import torch
 import numpy as np
 import cv2
 from tqdm import tqdm
-from attribution_generators.ViT_explanation_generator import LRP, RISE
+from attribution_generators.ViT_explanation_generator import ExplanationGenerator, RISE
 import h5py
 import os
 from torchvision.datasets import ImageNet
@@ -126,7 +126,7 @@ def imagenet_dataloader(imagenet_validation_path: str, batch_size: int = 1):
     return sample_loader
 
 
-#@logger.timed
+# @logger.timed
 def generate_heatmaps(args):
     cuda = torch.cuda.is_available()
     device = torch.device("cuda" if cuda else "cpu")
@@ -141,7 +141,8 @@ def generate_heatmaps(args):
         model = paper_vit_base_patch16_224().to(device)
 
     model.eval()
-    attribution_generator = LRP(model)
+
+    attribution_generator = ExplanationGenerator(model)
 
     rise = None
     if args.method == 'rise':
@@ -171,7 +172,7 @@ def main_test():
     # model = vit_base_patch16_224().to(device)
     model = our_vit_base_patch16_224().to(device)
     model.eval()
-    attribution_generator = LRP(model)
+    attribution_generator = ExplanationGenerator(model)
     image = Image.open('samples/catdog.png')
     dog_cat_image = transform(image)
 
@@ -222,7 +223,7 @@ if __name__ == "__main__":
                         help='')
     parser.add_argument('--imagenet-validation-path', type=str,
                         required=True,
-                        #default="/home/tf-exp-o-data/",
+                        # default="/home/tf-exp-o-data/",
                         help='')
     parser.add_argument('--vit-model', type=str,
                         # required=True,

@@ -16,7 +16,7 @@ from utils import render
 
 
 from data.Imagenet import Imagenet_Segmentation
-from attribution_generators.ViT_explanation_generator import LRP
+from attribution_generators.ViT_explanation_generator import ExplanationGenerator
 from baseline.models.ViT_paper import vit_base_patch16_224 as paper_vit_base_patch16_224
 from baseline.models.ViT_ours import vit_base_patch16_224 as our_vit_base_patch16_224
 
@@ -178,7 +178,7 @@ def run_seg_eval(args):
     else:
         model = paper_vit_base_patch16_224().to(device)
 
-    attribution_generator = LRP(model)
+    attribution_generator = ExplanationGenerator(model)
     model.eval()
 
     total_inter, total_union, total_correct, total_label = np.int64(
