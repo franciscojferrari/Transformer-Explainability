@@ -609,7 +609,8 @@ def main():
     parser.add_argument('--score_file', dest='score_file', required=False, default=None, help='Where to write results?')
     parser.add_argument('--aopc_thresholds', nargs='+', required=False, type=float, default=[0.01, 0.05, 0.1, 0.2, 0.5], help='Thresholds for AOPC Thresholds')
     args = parser.parse_args()
-    results = load_jsonl(args.results)[0]
+    results = load_jsonl(args.results)
+    print(results)
     docids = set(chain.from_iterable([rat['docid'] for rat in res['rationales']] for res in results))
     docs = load_flattened_documents(args.data_dir, docids)
     verify_instances(results, docs)

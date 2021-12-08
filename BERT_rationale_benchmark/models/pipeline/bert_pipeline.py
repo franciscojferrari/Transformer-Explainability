@@ -233,6 +233,8 @@ def main():
                         help='Where shall we write intermediate models + final data to?')
     parser.add_argument('--model_params', dest='model_params', required=True,
                         help='JSoN file for loading arbitrary model parameters (e.g. optimizers, pre-saved files, etc.')
+    parser.add_argument('--test', required=False, action="store_true")
+    parser.add_argument('-ckpt', type=str)
     args = parser.parse_args()
     assert BATCH_FIRST
     os.makedirs(args.output_dir, exist_ok=True)
@@ -241,210 +243,204 @@ def main():
         logger.info(f'Loading model parameters from {args.model_params}')
         model_params = json.load(fp)
         logger.info(f'Params: {json.dumps(model_params, indent=2, sort_keys=True)}')
-    train, val, test = load_datasets(args.data_dir)
-    docids = set(e.docid for e in
-                 chain.from_iterable(chain.from_iterable(map(lambda ann: ann.evidences, chain(train, val, test)))))
-    documents = load_documents(args.data_dir, docids)
-    logger.info(f'Loaded {len(documents)} documents')
-    evidence_classifier, word_interner, de_interner, evidence_classes, tokenizer = \
-        initialize_models(model_params, batch_first=BATCH_FIRST)
-    logger.info(f'We have {len(word_interner)} wordpieces')
-    cache = os.path.join(args.output_dir, 'preprocessed.pkl')
-    if os.path.exists(cache):
-        logger.info(f'Loading interned documents from {cache}')
-        (interned_documents) = torch.load(cache)
-    else:
-        logger.info(f'Interning documents')
-        interned_documents = {}
-        for d, doc in documents.items():
-            encoding = tokenizer.encode_plus(
-                doc,
-                add_special_tokens=True,
-                max_length=model_params['max_length'],
-                return_token_type_ids=False,
-                pad_to_max_length=False,
-                return_attention_mask=True,
-                return_tensors='pt',
-                truncation=True,
-            )
-            interned_documents[d] = encoding
-        torch.save((interned_documents), cache)
+        train, val, test = load_datasets(args.data_dir)
+        docids = set(e.docid for e in
+                    chain.from_iterable(chain.from_iterable(map(lambda ann: ann.evidences, chain(train, val, test)))))
+        documents = load_documents(args.data_dir, docids)
+        logger.info(f'Loaded {len(documents)} documents')
+        evidence_classifier, word_interner, de_interner, evidence_classes, tokenizer = \
+            initialize_models(model_params, batch_first=BATCH_FIRST)
+        logger.info(f'We have {len(word_interner)} wordpieces')
+        cache = os.path.join(args.output_dir, 'preprocessed.pkl')
+        if os.path.exists(cache):
+            logger.info(f'Loading interned documents from {cache}')
+            (interned_documents) = torch.load(cache)
+        else:
+            logger.info(f'Interning documents')
+            interned_documents = {}
+            for d, doc in documents.items():
+                encoding = tokenizer.encode_plus(
+                    doc,
+                    add_special_tokens=True,
+                    max_length=model_params['max_length'],
+                    return_token_type_ids=False,
+                    pad_to_max_length=False,
+                    return_attention_mask=True,
+                    return_tensors='pt',
+                    truncation=True,
+                )
+                interned_documents[d] = encoding
+            torch.save((interned_documents), cache)
 
-    evidence_classifier = evidence_classifier.cpu()
-    optimizer = None
-    scheduler = None
+        evidence_classifier = evidence_classifier.cpu() # change to gpu if it is used
+        optimizer = None
+        scheduler = None
 
-    save_dir = args.output_dir
+        save_dir = args.output_dir
 
-    logging.info(f'Beginning training classifier')
-    evidence_classifier_output_dir = os.path.join(save_dir, 'classifier')
-    os.makedirs(save_dir, exist_ok=True)
-    os.makedirs(evidence_classifier_output_dir, exist_ok=True)
-    model_save_file = os.path.join(evidence_classifier_output_dir, 'classifier.pt')
-    epoch_save_file = os.path.join(evidence_classifier_output_dir, 'classifier_epoch_data.pt')
+        device = next(evidence_classifier.parameters()).device
 
-    device = next(evidence_classifier.parameters()).device
-    if optimizer is None:
-        optimizer = torch.optim.Adam(evidence_classifier.parameters(), lr=model_params['evidence_classifier']['lr'])
-    criterion = nn.CrossEntropyLoss(reduction='none')
-    batch_size = model_params['evidence_classifier']['batch_size']
-    epochs = model_params['evidence_classifier']['epochs']
-    patience = model_params['evidence_classifier']['patience']
-    max_grad_norm = model_params['evidence_classifier'].get('max_grad_norm', None)
+    if not args.test:
+        logging.info(f'Beginning training classifier')
+        evidence_classifier_output_dir = os.path.join(save_dir, 'classifier')
+        os.makedirs(save_dir, exist_ok=True)
+        os.makedirs(evidence_classifier_output_dir, exist_ok=True)
+        model_save_file = os.path.join(evidence_classifier_output_dir, 'classifier.pt')
+        epoch_save_file = os.path.join(evidence_classifier_output_dir, 'classifier_epoch_data.pt')
 
-    class_labels = [k for k, v in sorted(evidence_classes.items())]
+        device = next(evidence_classifier.parameters()).device
+        if optimizer is None:
+            optimizer = torch.optim.Adam(evidence_classifier.parameters(), lr=model_params['evidence_classifier']['lr'])
+        criterion = nn.CrossEntropyLoss(reduction='none')
+        batch_size = model_params['evidence_classifier']['batch_size']
+        epochs = model_params['evidence_classifier']['epochs']
+        patience = model_params['evidence_classifier']['patience']
+        max_grad_norm = model_params['evidence_classifier'].get('max_grad_norm', None)
 
-    results = {
-        'train_loss': [],
-        'train_f1': [],
-        'train_acc': [],
-        'val_loss': [],
-        'val_f1': [],
-        'val_acc': [],
-    }
-    best_epoch = -1
-    best_val_acc = 0
-    best_val_loss = float('inf')
-    best_model_state_dict = None
-    start_epoch = 0
-    epoch_data = {}
-    if os.path.exists(epoch_save_file):
-        logging.info(f'Restoring model from {model_save_file}')
-        evidence_classifier.load_state_dict(torch.load(model_save_file))
-        epoch_data = torch.load(epoch_save_file)
-        start_epoch = epoch_data['epoch'] + 1
-        # handle finishing because patience was exceeded or we didn't get the best final epoch
-        if bool(epoch_data.get('done', 0)):
-            start_epoch = epochs
-        results = epoch_data['results']
-        best_epoch = start_epoch
-        best_model_state_dict = OrderedDict({k: v.cpu() for k, v in evidence_classifier.state_dict().items()})
-        logging.info(f'Restoring training from epoch {start_epoch}')
-    logging.info(f'Training evidence classifier from epoch {start_epoch} until epoch {epochs}')
-    optimizer.zero_grad()
-    for epoch in range(start_epoch, epochs):
-        epoch_train_data = random.sample(train, k=len(train))
-        epoch_train_loss = 0
-        epoch_training_acc = 0
-        evidence_classifier.train()
-        logging.info(
-            f'Training with {len(epoch_train_data) // batch_size} batches with {len(epoch_train_data)} examples')
-        for batch_start in range(0, len(epoch_train_data), batch_size):
-            batch_elements = epoch_train_data[batch_start:min(batch_start + batch_size, len(epoch_train_data))]
-            targets = [evidence_classes[s.classification] for s in batch_elements]
-            targets = torch.tensor(targets, dtype=torch.long, device=device)
-            samples_encoding = [interned_documents[extract_docid_from_dataset_element(s)] for s in batch_elements]
-            input_ids = torch.stack([samples_encoding[i]['input_ids'] for i in range(len(samples_encoding))]).squeeze(
-                1).to(device)
-            attention_masks = torch.stack(
-                [samples_encoding[i]['attention_mask'] for i in range(len(samples_encoding))]).squeeze(1).to(device)
-            preds = evidence_classifier(input_ids=input_ids, attention_mask=attention_masks)[0]
-            epoch_training_acc += accuracy_score(preds.argmax(dim=1).cpu(), targets.cpu(), normalize=False)
-            loss = criterion(preds, targets.to(device=preds.device)).sum()
-            epoch_train_loss += loss.item()
-            loss.backward()
-            assert loss == loss  # for nans
-            if max_grad_norm:
-                torch.nn.utils.clip_grad_norm_(evidence_classifier.parameters(), max_grad_norm)
-            optimizer.step()
-            if scheduler:
-                scheduler.step()
-            optimizer.zero_grad()
-        epoch_train_loss /= len(epoch_train_data)
-        epoch_training_acc /= len(epoch_train_data)
-        assert epoch_train_loss == epoch_train_loss  # for nans
-        results['train_loss'].append(epoch_train_loss)
-        logging.info(f'Epoch {epoch} training loss {epoch_train_loss}')
-        logging.info(f'Epoch {epoch} training accuracy {epoch_training_acc}')
+        class_labels = [k for k, v in sorted(evidence_classes.items())]
 
-        with torch.no_grad():
-            epoch_val_loss = 0
-            epoch_val_acc = 0
-            epoch_val_data = random.sample(val, k=len(val))
-            evidence_classifier.eval()
-            val_batch_size = 32
+        results = {
+            'train_loss': [],
+            'train_f1': [],
+            'train_acc': [],
+            'val_loss': [],
+            'val_f1': [],
+            'val_acc': [],
+        }
+        best_epoch = -1
+        best_val_acc = 0
+        best_val_loss = float('inf')
+        best_model_state_dict = None
+        start_epoch = 0
+        epoch_data = {}
+        if os.path.exists(epoch_save_file):
+            logging.info(f'Restoring model from {model_save_file}')
+            evidence_classifier.load_state_dict(torch.load(model_save_file))
+            epoch_data = torch.load(epoch_save_file)
+            start_epoch = epoch_data['epoch'] + 1
+            # handle finishing because patience was exceeded or we didn't get the best final epoch
+            if bool(epoch_data.get('done', 0)):
+                start_epoch = epochs
+            results = epoch_data['results']
+            best_epoch = start_epoch
+            best_model_state_dict = OrderedDict({k: v.cpu() for k, v in evidence_classifier.state_dict().items()})
+            logging.info(f'Restoring training from epoch {start_epoch}')
+        logging.info(f'Training evidence classifier from epoch {start_epoch} until epoch {epochs}')
+        optimizer.zero_grad()
+        for epoch in range(start_epoch, epochs):
+            epoch_train_data = random.sample(train, k=len(train))
+            epoch_train_loss = 0
+            epoch_training_acc = 0
+            evidence_classifier.train()
             logging.info(
-                f'Validating with {len(epoch_val_data) // val_batch_size} batches with {len(epoch_val_data)} examples')
-            for batch_start in range(0, len(epoch_val_data), val_batch_size):
-                batch_elements = epoch_val_data[batch_start:min(batch_start + val_batch_size, len(epoch_val_data))]
+                f'Training with {len(epoch_train_data) // batch_size} batches with {len(epoch_train_data)} examples')
+            for batch_start in range(0, len(epoch_train_data), batch_size):
+                batch_elements = epoch_train_data[batch_start:min(batch_start + batch_size, len(epoch_train_data))]
                 targets = [evidence_classes[s.classification] for s in batch_elements]
                 targets = torch.tensor(targets, dtype=torch.long, device=device)
                 samples_encoding = [interned_documents[extract_docid_from_dataset_element(s)] for s in batch_elements]
-                input_ids = torch.stack(
-                    [samples_encoding[i]['input_ids'] for i in range(len(samples_encoding))]).squeeze(1).to(device)
+                input_ids = torch.stack([samples_encoding[i]['input_ids'] for i in range(len(samples_encoding))]).squeeze(
+                    1).to(device)
                 attention_masks = torch.stack(
-                    [samples_encoding[i]['attention_mask'] for i in range(len(samples_encoding))]).squeeze(1).to(
-                    device)
+                    [samples_encoding[i]['attention_mask'] for i in range(len(samples_encoding))]).squeeze(1).to(device)
                 preds = evidence_classifier(input_ids=input_ids, attention_mask=attention_masks)[0]
-                epoch_val_acc += accuracy_score(preds.argmax(dim=1).cpu(), targets.cpu(), normalize=False)
+                epoch_training_acc += accuracy_score(preds.argmax(dim=1).cpu(), targets.cpu(), normalize=False)
                 loss = criterion(preds, targets.to(device=preds.device)).sum()
-                epoch_val_loss += loss.item()
+                epoch_train_loss += loss.item()
+                loss.backward()
+                assert loss == loss  # for nans
+                if max_grad_norm:
+                    torch.nn.utils.clip_grad_norm_(evidence_classifier.parameters(), max_grad_norm)
+                optimizer.step()
+                if scheduler:
+                    scheduler.step()
+                optimizer.zero_grad()
+            epoch_train_loss /= len(epoch_train_data)
+            epoch_training_acc /= len(epoch_train_data)
+            assert epoch_train_loss == epoch_train_loss  # for nans
+            results['train_loss'].append(epoch_train_loss)
+            logging.info(f'Epoch {epoch} training loss {epoch_train_loss}')
+            logging.info(f'Epoch {epoch} training accuracy {epoch_training_acc}')
 
-            epoch_val_loss /= len(val)
-            epoch_val_acc /= len(val)
-            results["val_acc"].append(epoch_val_acc)
-            results["val_loss"] = epoch_val_loss
+            with torch.no_grad():
+                epoch_val_loss = 0
+                epoch_val_acc = 0
+                epoch_val_data = random.sample(val, k=len(val))
+                evidence_classifier.eval()
+                val_batch_size = 32
+                logging.info(
+                    f'Validating with {len(epoch_val_data) // val_batch_size} batches with {len(epoch_val_data)} examples')
+                for batch_start in range(0, len(epoch_val_data), val_batch_size):
+                    batch_elements = epoch_val_data[batch_start:min(batch_start + val_batch_size, len(epoch_val_data))]
+                    targets = [evidence_classes[s.classification] for s in batch_elements]
+                    targets = torch.tensor(targets, dtype=torch.long, device=device)
+                    samples_encoding = [interned_documents[extract_docid_from_dataset_element(s)] for s in batch_elements]
+                    input_ids = torch.stack(
+                        [samples_encoding[i]['input_ids'] for i in range(len(samples_encoding))]).squeeze(1).to(device)
+                    attention_masks = torch.stack(
+                        [samples_encoding[i]['attention_mask'] for i in range(len(samples_encoding))]).squeeze(1).to(
+                        device)
+                    preds = evidence_classifier(input_ids=input_ids, attention_mask=attention_masks)[0]
+                    epoch_val_acc += accuracy_score(preds.argmax(dim=1).cpu(), targets.cpu(), normalize=False)
+                    loss = criterion(preds, targets.to(device=preds.device)).sum()
+                    epoch_val_loss += loss.item()
 
-            logging.info(f'Epoch {epoch} val loss {epoch_val_loss}')
-            logging.info(f'Epoch {epoch} val acc {epoch_val_acc}')
+                epoch_val_loss /= len(val)
+                epoch_val_acc /= len(val)
+                results["val_acc"].append(epoch_val_acc)
+                results["val_loss"] = epoch_val_loss
 
-            if epoch_val_acc > best_val_acc or (epoch_val_acc == best_val_acc and epoch_val_loss < best_val_loss):
-                best_model_state_dict = OrderedDict({k: v.cpu() for k, v in evidence_classifier.state_dict().items()})
-                best_epoch = epoch
-                best_val_acc = epoch_val_acc
-                best_val_loss = epoch_val_loss
-                epoch_data = {
-                    'epoch': epoch,
-                    'results': results,
-                    'best_val_acc': best_val_acc,
-                    'done': 0,
-                }
-                torch.save(evidence_classifier.state_dict(), model_save_file)
+                logging.info(f'Epoch {epoch} val loss {epoch_val_loss}')
+                logging.info(f'Epoch {epoch} val acc {epoch_val_acc}')
+
+                if epoch_val_acc > best_val_acc or (epoch_val_acc == best_val_acc and epoch_val_loss < best_val_loss):
+                    best_model_state_dict = OrderedDict({k: v.cpu() for k, v in evidence_classifier.state_dict().items()})
+                    best_epoch = epoch
+                    best_val_acc = epoch_val_acc
+                    best_val_loss = epoch_val_loss
+                    epoch_data = {
+                        'epoch': epoch,
+                        'results': results,
+                        'best_val_acc': best_val_acc,
+                        'done': 0,
+                    }
+                    torch.save(evidence_classifier.state_dict(), model_save_file)
+                    torch.save(epoch_data, epoch_save_file)
+                    logging.debug(f'Epoch {epoch} new best model with val accuracy {epoch_val_acc}')
+            if epoch - best_epoch > patience:
+                logging.info(f'Exiting after epoch {epoch} due to no improvement')
+                epoch_data['done'] = 1
                 torch.save(epoch_data, epoch_save_file)
-                logging.debug(f'Epoch {epoch} new best model with val accuracy {epoch_val_acc}')
-        if epoch - best_epoch > patience:
-            logging.info(f'Exiting after epoch {epoch} due to no improvement')
-            epoch_data['done'] = 1
-            torch.save(epoch_data, epoch_save_file)
-            break
+                break
 
-    epoch_data['done'] = 1
-    epoch_data['results'] = results
-    torch.save(epoch_data, epoch_save_file)
-    evidence_classifier.load_state_dict(best_model_state_dict)
-    evidence_classifier = evidence_classifier.to(device=device)
-    evidence_classifier.eval()
+        epoch_data['done'] = 1
+        epoch_data['results'] = results
+        torch.save(epoch_data, epoch_save_file)
+        evidence_classifier.load_state_dict(best_model_state_dict)
+        evidence_classifier = evidence_classifier.to(device=device)
+        evidence_classifier.eval()
 
     # test
 
     test_classifier = BertForSequenceClassificationTest.from_pretrained(model_params['bert_dir'],
                                                                         num_labels=len(evidence_classes)).to(device)
-    orig_lrp_classifier = BertForClsOrigLrp.from_pretrained(model_params['bert_dir'],
-                                                            num_labels=len(evidence_classes)).to(device)
-    if os.path.exists(epoch_save_file):
+    try:
+        model_save_file = model_save_file
+    except UnboundLocalError:
+        model_save_file = args.ckpt
+    if os.path.exists(model_save_file) or args.test:
         logging.info(f'Restoring model from {model_save_file}')
-        test_classifier.load_state_dict(torch.load(model_save_file))
-        orig_lrp_classifier.load_state_dict(torch.load(model_save_file))
+        test_classifier.load_state_dict(torch.load(model_save_file, map_location=device))
         test_classifier.eval()
-        orig_lrp_classifier.eval()
         test_batch_size = 1
         logging.info(
             f'Testing with {len(test) // test_batch_size} batches with {len(test)} examples')
 
         # explainability
-        explanations = Generator(test_classifier)
-        explanations_orig_lrp = Generator(orig_lrp_classifier)
+        explanations = BertForSequenceClassificationExplanator(test_classifier)
         method = "transformer_attribution"
-        method_folder = {"transformer_attribution": "ours", "partial_lrp": "partial_lrp", "last_attn": "last_attn",
-                         "attn_gradcam": "attn_gradcam", "lrp": "lrp", "rollout": "rollout",
-                         "ground_truth": "ground_truth", "generate_all": "generate_all"}
-        method_expl = {"transformer_attribution": explanations.generate_LRP,
-                       "partial_lrp": explanations_orig_lrp.generate_LRP_last_layer,
-                       "last_attn": explanations_orig_lrp.generate_attn_last_layer,
-                       "attn_gradcam": explanations_orig_lrp.generate_attn_gradcam,
-                       "lrp": explanations_orig_lrp.generate_full_lrp,
-                       "rollout": explanations_orig_lrp.generate_rollout}
 
+        method_folder = {"transformer_attribution": "ours"}
         os.makedirs(os.path.join(args.output_dir, method_folder[method]), exist_ok=True)
 
         result_files = []
@@ -537,7 +533,7 @@ def main():
                             break
                         end_idx = evidence.end_token
                         cam[start_idx:end_idx] = 1
-                    generate(inp_cropped, cam,
+                    generate(inp_cropped, cam[0],
                              (os.path.join(args.output_dir, '{0}/visual_results_{1}.tex').format(method_folder[method],
                                                                                                  j)), color="green")
                     j = j + 1
@@ -546,19 +542,19 @@ def main():
                 classification = "neg" if targets.item() == 0 else "pos"
                 is_classification_correct = 1 if preds.argmax(dim=1) == targets else 0
                 target_idx = targets.item()
-                cam_target = method_expl[method](input_ids=input_ids, attention_mask=attention_masks, index=target_idx)[0]
+                cam_target = explanations.generate_explanation(input_ids=input_ids, attention_mask=attention_masks, index=target_idx)[0]
                 cam_target = cam_target.clamp(min=0)
-                generate(text, cam_target,
+                generate(text, cam_target[0],
                          (os.path.join(args.output_dir, '{0}/{1}_GT_{2}_{3}.tex').format(
                              method_folder[method], j, classification, is_classification_correct)))
                 if method in ["transformer_attribution", "partial_lrp", "attn_gradcam", "lrp"]:
-                    cam_false_class = method_expl[method](input_ids=input_ids, attention_mask=attention_masks, index=1-target_idx)[0]
+                    cam_false_class = explanations.generate_explanation(input_ids=input_ids, attention_mask=attention_masks, index=1-target_idx)[0]
                     cam_false_class = cam_false_class.clamp(min=0)
-                    generate(text, cam_false_class,
+                    generate(text, cam_false_class[0],
                          (os.path.join(args.output_dir, '{0}/{1}_CF.tex').format(
                              method_folder[method], j)))
                 cam = cam_target
-                cam = scores_per_word_from_scores_per_token(inp, tokenizer,input_ids[0], cam)
+                cam = scores_per_word_from_scores_per_token(inp, tokenizer,input_ids[0], cam[0].detach())
                 j = j + 1
                 doc_name = extract_docid_from_dataset_element(s)
                 hard_rationales = []

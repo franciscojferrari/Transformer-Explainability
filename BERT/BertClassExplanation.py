@@ -8,10 +8,14 @@ class BertForSequenceClassificationExplanator:
         self.bert_model = bert_model
         self.bert_model.eval()
 
-    def generate_explanation(self, normalize_scores=False, get_logits=False, **input):
+    def generate_explanation(self, normalize_scores=False, get_logits=False, index=None, **input):
         output = self.bert_model(**input)
         logits = output.logits.reshape(input["input_ids"].shape[0], self.bert_model.config.num_labels)
-        one_hot = torch.nn.functional.one_hot(torch.argmax(logits, dim=1), self.bert_model.config.num_labels)
+        if index is None:
+            one_hot = torch.nn.functional.one_hot(torch.argmax(logits, dim=1), self.bert_model.config.num_labels).detach()
+        else:
+            one_hot = torch.zeros(logits.shape, device=input["input_ids"].device)
+            one_hot[:, index] = 1
 
         self.bert_model.zero_grad()
         backprop_me = (one_hot * logits).sum()
