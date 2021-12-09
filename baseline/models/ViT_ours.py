@@ -408,7 +408,7 @@ class VisionTransformer(nn.Module):
 
         # Partial LRP: only consider last layer attention   
         elif method == "partial_lrp":
-            cam = self.blocks[-1].attn.get_attn()
+            cam = self.blocks[-1].attn.get_attn_cam()
             cam = cam[0].reshape(-1, cam.shape[-1], cam.shape[-1])
             cam = cam.clamp(min=0).mean(dim=0)
             cam = cam[0, 1:]
