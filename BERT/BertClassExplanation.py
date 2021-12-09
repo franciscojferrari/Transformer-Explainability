@@ -8,10 +8,14 @@ class BertForSequenceClassificationExplanator:
         self.bert_model = bert_model
         self.bert_model.eval()
 
-    def generate_explanation(self, normalize_scores=False, get_logits=False, **input):
+    def generate_explanation(self, normalize_scores=False, get_logits=False, index=None, **input):
         output = self.bert_model(**input)
         logits = output.logits.reshape(input["input_ids"].shape[0], self.bert_model.config.num_labels)
-        one_hot = torch.nn.functional.one_hot(torch.argmax(logits, dim=1), self.bert_model.config.num_labels)
+        if index is None:
+            one_hot = torch.nn.functional.one_hot(torch.argmax(logits, dim=1), self.bert_model.config.num_labels).detach()
+        else:
+            one_hot = torch.zeros(logits.shape, device=input["input_ids"].device)
+            one_hot[:, index] = 1
 
         self.bert_model.zero_grad()
         backprop_me = (one_hot * logits).sum()
@@ -69,7 +73,7 @@ if __name__ == "__main__":
     model = BertForSequenceClassification.from_pretrained(huggingface_model_name, num_labels=2)
     print("Using activation func: ", model.config.hidden_act)
     explanator = BertForSequenceClassificationExplanator(model)
-    exp, pred = explanator.generate_explanation(**inputs)
+    exp, pred = explanator.generate_explanation(**inputs, normalize_scores=True)
     explanator.vizualize(exp, tokens, torch.argmax(pred,dim=1), torch.tensor([1, 0]), ["NEG", "POS"])
     # Notebook example
     # [('[CLS]', 0.0), ('this', 0.4398406744003296), ('movie', 0.3385171890258789), ('was', 0.2850261628627777), ('the', 0.3722951412200928), ('best', 0.6413642764091492), ('movie', 0.3098682463169098), ('i', 0.20284101366996765), ('have', 0.12214731425046921), ('ever', 0.15835356712341309), ('seen', 0.2082878053188324), ('!', 0.6001579761505127), ('some', 0.021879158914089203), ('scenes', 0.05488050356507301), ('were', 0.0371897891163826), ('ridiculous', 0.03780526667833328), (',', 0.02076297625899315), ('but', 0.44531309604644775), ('acting', 0.45006945729255676), ('was', 0.5168584585189819), ('great', 1.0), ('.', 0.035734280943870544), ('[SEP]', 0.10382220149040222)]

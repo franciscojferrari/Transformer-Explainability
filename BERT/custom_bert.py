@@ -6,8 +6,6 @@ from transformers.models.bert.modeling_bert import BertPreTrainedModel
 from transformers.modeling_outputs import BaseModelOutputWithPoolingAndCrossAttentions, BaseModelOutputWithPastAndCrossAttentions, SequenceClassifierOutput
 from transformers.activations import ACT2FN
 
-from BERT.custom_layer import *
-
 from packaging import version
 import math
 
@@ -17,6 +15,7 @@ from transformers.modeling_utils import (
     prune_linear_layer,
 )
 
+from BERT.custom_layer import *
 from BERT.custom_layer import TransposeForScores
 from BERT.custom_layer import CloneN
 from BERT.custom_layer import Clone
@@ -182,11 +181,11 @@ class BertModel(BertPreTrainedModel):
 
     def relprop(self, prev_rel, **kwargs):
         rel = self.pooler.relprop(prev_rel, **kwargs)
-        assert torch.isclose(rel.sum(dim=list(range(1, rel.dim()))),
-                             torch.ones(rel.shape[0], device=rel.device).float()).all()
+        # assert torch.isclose(rel.sum(dim=list(range(1, rel.dim()))),
+        #                      torch.ones(rel.shape[0], device=rel.device).float()).all()
         rel = self.encoder.relprop(rel, **kwargs)
-        assert torch.isclose(rel.sum(dim=list(range(1, rel.dim()))),
-                             torch.ones(rel.shape[0], device=rel.device).float()).all()
+        # assert torch.isclose(rel.sum(dim=list(range(1, rel.dim()))),
+        #                      torch.ones(rel.shape[0], device=rel.device).float()).all()
         return rel
 
 
@@ -439,15 +438,15 @@ class BertAttention(torch.nn.Module):
 
     def relprop(self, prev_rel, **kwargs):
         (rel, rel_residual) = self.output.relprop(prev_rel, **kwargs)
-        assert torch.isclose(rel.sum(dim=list(range(1, rel.dim()))) + rel_residual.sum(
-            dim=list(range(1, rel_residual.dim()))), torch.ones(rel.shape[0], device=rel.device).float()).all()
+        # assert torch.isclose(rel.sum(dim=list(range(1, rel.dim()))) + rel_residual.sum(
+        #     dim=list(range(1, rel_residual.dim()))), torch.ones(rel.shape[0], device=rel.device).float()).all()
         # self.self is for SelfAttention, weird naming scheme but whatever
         rel = self.self.relprop(rel, **kwargs)
-        assert torch.isclose(rel.sum(dim=list(range(1, rel.dim()))) + rel_residual.sum(
-            dim=list(range(1, rel_residual.dim()))), torch.ones(rel.shape[0], device=rel.device).float()).all()
+        # assert torch.isclose(rel.sum(dim=list(range(1, rel.dim()))) + rel_residual.sum(
+        #     dim=list(range(1, rel_residual.dim()))), torch.ones(rel.shape[0], device=rel.device).float()).all()
         rel = self.clone.relprop((rel, rel_residual), **kwargs)
-        assert torch.isclose(rel.sum(dim=list(range(1, rel.dim()))),
-                             torch.ones(rel.shape[0], device=rel.device).float()).all()
+        # assert torch.isclose(rel.sum(dim=list(range(1, rel.dim()))),
+        #                      torch.ones(rel.shape[0], device=rel.device).float()).all()
         return rel
 
 
@@ -904,11 +903,11 @@ class BertForSequenceClassification(BertPreTrainedModel):
 
     def relprop(self, prev_rel, **kwargs):
         rel = self.classifier.relprop(prev_rel, **kwargs)
-        assert torch.isclose(rel.sum(dim=list(range(1, rel.dim()))),
-                             torch.ones(rel.shape[0], device=rel.device).float()).all()
+        # assert torch.isclose(rel.sum(dim=list(range(1, rel.dim()))),
+        #                      torch.ones(rel.shape[0], device=rel.device).float()).all()
         rel = self.bert.relprop(rel, **kwargs)
-        assert torch.isclose(rel.sum(dim=list(range(1, rel.dim()))),
-                             torch.ones(rel.shape[0], device=rel.device).float()).all()
+        # assert torch.isclose(rel.sum(dim=list(range(1, rel.dim()))),
+        #                      torch.ones(rel.shape[0], device=rel.device).float()).all()
         return rel
 
 

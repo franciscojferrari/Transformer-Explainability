@@ -64,11 +64,11 @@ class BertSequenceClassificationSystem(pl.LightningModule):
     def test_step(self, test_batch, test_batch_id):
         torch.set_grad_enabled(True)
         explanation, one_hot_pred, logits = self.explanator.generate_explanation(**test_batch, get_logits=True)
-        np.savetxt("BERT_explanations/{}.csv".format(test_batch_id), explanation.detach().cpu().numpy())
+        np.savetxt("BERT/BERT_explanations/{}.csv".format(test_batch_id), explanation.detach().cpu().numpy())
         class_pred = torch.argmax(one_hot_pred, dim=1)
-        np.savetxt("BERT_preds/{}.csv".format(test_batch_id),
+        np.savetxt("BERT/BERT_preds/{}.csv".format(test_batch_id),
                    class_pred.detach().cpu().numpy())
-        np.savetxt("BERT_logits/{}.csv".format(test_batch_id),
+        np.savetxt("BERT/BERT_logits/{}.csv".format(test_batch_id),
                    logits.detach().cpu().numpy())
         return None
 
@@ -94,7 +94,7 @@ class BertSequenceClassificationSystem(pl.LightningModule):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Custom BERT model for pytorch.')
+    parser = argparse.ArgumentParser(description='Custom BERT model for pytorch using pytorch lightning.')
     parser.add_argument("-p", "--bert-params", type=str,
                         help="Path to bert params (json file).")
     parser.add_argument(
@@ -106,6 +106,7 @@ if __name__ == "__main__":
     parser.add_argument("-g", "--gpus", type=int, help="Choose amount of gpus to execute the model with")
     parser.add_argument("-b", "--bert-dir", type=str, help="Set the bert dir to load the huggingface model from. Can not specify -ckpt and -b at the same time.")
     parser.add_argument("-n", "--num-dataloader-workers", type=int, help="Set the num_workers of the DataLoader.")
+    parser.add_argument("-is", "--inference-split", type=str, help="The data split to use for inference")
     args = parser.parse_args()
 
     if args.bert_params is None:
@@ -172,18 +173,23 @@ if __name__ == "__main__":
     else:
         print("Starting to test...")
         try:
-            os.mkdir("BERT_explanations")
+            os.mkdir("BERT/BERT_results")
         except FileExistsError:
             pass
         try:
-            os.mkdir("BERT_preds")
+            os.mkdir("BERT/BERT_explanations")
         except FileExistsError:
             pass
         try:
-            os.mkdir("BERT_logits")
+            os.mkdir("BERT/BERT_preds")
         except FileExistsError:
             pass
-        train_dataset = load_dataset("movie_rationales", split="train")
+        try:
+            os.mkdir("BERT/BERT_logits")
+        except FileExistsError:
+            pass
+        data_split = "test" if args.inference_split is None else args.inference_split
+        train_dataset = load_dataset("movie_rationales", split=data_split)
         model_config = BertConfig.from_json_file(args.bert_params)
         tokenizer = AutoTokenizer.from_pretrained(model_config.bert_vocab)
 
