@@ -8,7 +8,7 @@ class BertForSequenceClassificationExplanator:
         self.bert_model = bert_model
         self.bert_model.eval()
 
-    def generate_explanation(self, normalize_scores=False, get_logits=False, index=None, **input):
+    def generate_explanation(self, normalize_scores=False, get_one_hot=False, get_logits=False, index=None, **input):
         output = self.bert_model(**input)
         logits = output.logits.reshape(input["input_ids"].shape[0], self.bert_model.config.num_labels)
         if index is None:
@@ -38,9 +38,13 @@ class BertForSequenceClassificationExplanator:
             weighted_attention_relevance = \
                 (weighted_attention_relevance - weighted_attention_relevance.min()) / \
                 (weighted_attention_relevance.max() - weighted_attention_relevance.min())
-        if get_logits:
+        if get_logits and get_one_hot:
             return weighted_attention_relevance, one_hot, logits
-        return weighted_attention_relevance, one_hot
+        if get_logits and not get_one_hot:
+            return weighted_attention_relevance, logits
+        if not get_logits and get_one_hot:
+            return weighted_attention_relevance, one_hot
+        return weighted_attention_relevance
 
     def vizualize(self, explanations, tokens, pred, label, label_string, label_being_explained=1):
         for i in range(explanations.shape[0]):
