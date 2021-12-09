@@ -17,8 +17,6 @@ from transformers.modeling_utils import (
 
 from BERT.custom_layer import *
 from BERT.custom_layer import TransposeForScores
-from BERT.custom_layer import CloneN
-from BERT.custom_layer import Clone
 from BERT.custom_layer import Mul
 
 # Base model of BERT gotten from huggingfaces: https://github.com/huggingface/transformers/blob/master/src/transformers/models/bert/modeling_bert.py
@@ -392,7 +390,6 @@ class BertAttention(torch.nn.Module):
         self.self = BertSelfAttention(config)
         self.output = BertSelfOutput(config)
         self.pruned_heads = set()
-        self.clone = Clone()
 
     def prune_heads(self, heads):
         if len(heads) == 0:
@@ -422,9 +419,8 @@ class BertAttention(torch.nn.Module):
         past_key_value=None,
         output_attentions=False,
     ):
-        hidden_states1, hidden_states2 = self.clone(hidden_states)
         self_outputs = self.self(
-            hidden_states1,
+            hidden_states,
             attention_mask,
             head_mask,
             encoder_hidden_states,
@@ -432,7 +428,7 @@ class BertAttention(torch.nn.Module):
             past_key_value,
             output_attentions,
         )
-        attention_output = self.output(self_outputs[0], hidden_states2)
+        attention_output = self.output(self_outputs[0], hidden_states)
         outputs = (attention_output,) + self_outputs[1:]  # add attentions if we output them
         return outputs
 
@@ -444,7 +440,7 @@ class BertAttention(torch.nn.Module):
         rel = self.self.relprop(rel, **kwargs)
         # assert torch.isclose(rel.sum(dim=list(range(1, rel.dim()))) + rel_residual.sum(
         #     dim=list(range(1, rel_residual.dim()))), torch.ones(rel.shape[0], device=rel.device).float()).all()
-        rel = self.clone.relprop((rel, rel_residual), **kwargs)
+        rel = rel + rel_residual
         # assert torch.isclose(rel.sum(dim=list(range(1, rel.dim()))),
         #                      torch.ones(rel.shape[0], device=rel.device).float()).all()
         return rel
@@ -463,11 +459,10 @@ class BertSelfAttention(torch.nn.Module):
         self.attention_head_size = int(config.hidden_size / config.num_attention_heads)
         self.all_head_size = self.num_attention_heads * self.attention_head_size
 
-        self.matmul1 = MatMul2()
+        self.matmul1 = MatMul1()
         self.matmul2 = MatMul2()
         self.mul = Mul()
         self.add = Add()
-        self.cloneN = CloneN()
 
         self.query = Linear(config.hidden_size, self.all_head_size)
         self.key = Linear(config.hidden_size, self.all_head_size)
@@ -511,8 +506,7 @@ class BertSelfAttention(torch.nn.Module):
     ):
         self.head_mask = head_mask
         self.attention_mask = attention_mask
-        hidden_states1, hidden_states2, hidden_states3 = self.cloneN(hidden_states, 3)
-        mixed_query_layer = self.query(hidden_states1)
+        mixed_query_layer = self.query(hidden_states)
 
         # If this is instantiated as a cross-attention module, the keys
         # and values come from an encoder; the attention mask needs to be
@@ -534,19 +528,19 @@ class BertSelfAttention(torch.nn.Module):
             attention_mask = encoder_attention_mask
         elif past_key_value is not None:
             key_layer = self.transpose_for_scores_key(
-                self.key(hidden_states2),
+                self.key(hidden_states),
                 self.num_attention_heads, self.attention_head_size)
             value_layer = self.transpose_for_scores_value(
-                self.value(hidden_states3),
+                self.value(hidden_states),
                 self.num_attention_heads, self.attention_head_size)
             key_layer = torch.cat([past_key_value[0], key_layer], dim=2)
             value_layer = torch.cat([past_key_value[1], value_layer], dim=2)
         else:
             key_layer = self.transpose_for_scores_key(
-                self.key(hidden_states2),
+                self.key(hidden_states),
                 self.num_attention_heads, self.attention_head_size)
             value_layer = self.transpose_for_scores_value(
-                self.value(hidden_states3),
+                self.value(hidden_states),
                 self.num_attention_heads, self.attention_head_size)
 
         query_layer = self.transpose_for_scores_query(
@@ -645,7 +639,7 @@ class BertSelfAttention(torch.nn.Module):
         rel_value = self.transpose_for_scores_value.relprop(rel_value, **kwargs)
         rel_value = self.value.relprop(rel_value, **kwargs)
 
-        rel = self.cloneN.relprop((rel_query, rel_key, rel_value), **kwargs)
+        rel = rel_query + rel_key + rel_value
 
         return rel
 
@@ -723,7 +717,6 @@ class BertLayer(torch.nn.Module):
                 raise ValueError(
                     f"{self} should be used as a decoder model if cross attention is added")
             self.crossattention = BertAttention(config)
-        self.clone = Clone()  # Class only for cloning into two tensors
         self.intermediate = BertIntermediate(config)
         self.output = BertOutput(config)
 
@@ -800,14 +793,13 @@ class BertLayer(torch.nn.Module):
         # --- Chunked ---
         if self.is_decoder:
             pass  # Decoder is not used for classification
-        rel = self.clone.relprop((rel, rel_residual), **kwargs)
+        rel = rel + rel_residual
         rel = self.attention.relprop(rel, **kwargs)
         return rel
 
     def feed_forward_chunk(self, attention_output):
-        attention_output1, attention_output2 = self.clone(attention_output)
-        intermediate_output = self.intermediate(attention_output1)
-        layer_output = self.output(intermediate_output, attention_output2)
+        intermediate_output = self.intermediate(attention_output)
+        layer_output = self.output(intermediate_output, attention_output)
         return layer_output
 
 
