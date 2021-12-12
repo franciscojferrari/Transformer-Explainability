@@ -9,7 +9,6 @@ __all__ = ['forward_hook', 'Add', 'ReLU', 'GELU', 'Dropout',
 
 
 def safe_divide(a, b):
-    # TODO: Change to a new simpler safe_divice
     den = b.clamp(min=1e-9) + b.clamp(max=1e-9)
     den = den + den.eq(0).type(den.type()) * 1e-9
     return a / den * b.ne(0).type(b.type())
@@ -53,7 +52,7 @@ class GELU(nn.GELU, RelProp):
 
 
 class Softmax(nn.Softmax, RelProp):
-    pass
+    pass    
 
 
 class LayerNorm(nn.LayerNorm, RelProp):
@@ -63,13 +62,13 @@ class LayerNorm(nn.LayerNorm, RelProp):
 class Dropout(nn.Dropout, RelProp):
     pass
 
-
+# Reimplemented
 class Add(RelProp):
     def forward(self, inputs):
         return torch.add(*inputs)
 
     def relprop(self, R, alpha):
-        # CHECKED: equivalent as their implementation
+        # CHECKED: closed form implementation equivalent to original 
         Z = self.forward(self.X)
         S = safe_divide(R, Z)
         a = self.X[0] * S
@@ -87,7 +86,7 @@ class Add(RelProp):
         outputs = [a, b]
         return outputs
 
-
+# Reimplemented
 class IndexSelect(RelProp):
     # This function is used to select the relevance of only the token 0, which is the input to the MLP.
     def forward(self, inputs, dim, indices):
@@ -97,14 +96,14 @@ class IndexSelect(RelProp):
         return torch.index_select(inputs, dim, indices)
 
     def relprop(self, R, alpha, device):
-        # CHECKED. Same as original implementation
+        # CHECKED: closed form implementation equivalent to original 
         # We get R from the classification head, which is connected to final token 0
         # We have to expand the relevance R to acount for all 197 tokens, and init R as 0 for the rest of the tokens
         R_new = torch.zeros((1, 197, 768)).to(device)
         R_new[:, 0, :] = R
         return R_new
 
-
+# Reimplemented
 class Linear(nn.Linear, RelProp):
     def relprop(self, R, alpha, use_eps_rule=False):
         if use_eps_rule:
@@ -119,7 +118,7 @@ class Linear(nn.Linear, RelProp):
         return self.X * C
 
     def relprop_alphabeta(self, R):
-        # CHECKED: same as their implementation when alpha=1
+        # CHECKED: closed form implementation equivalent to original 
         pw = torch.clamp(self.weight, min=0)
         nw = torch.clamp(self.weight, max=0)
         px = torch.clamp(self.X, min=0)
@@ -133,14 +132,12 @@ class Linear(nn.Linear, RelProp):
 
         return px * C1 + nx * C2
 
-
+# Reimplemented
 class MatMul1(RelProp):
     # Inheriting from RelProp we get the forward hook that sets self.X = [q, k]
     def relprop(self, R):
         '''
         LRP_eps for matrix multiplication
-        STATUS: it works for the last block, but for rest cam_k is not the same as original repo (cam_q is OK)
-            The change is only in the LAST TOKEN C2[:, :, 196, :]. The first 0-195 are exactly the same as original paper
         '''
         Q = self.X[0]
         K = self.X[1]
@@ -157,7 +154,7 @@ class MatMul1(RelProp):
         assert len(X) == 2
         return torch.einsum('bhid,bhjd->bhij', X[0], X[1])
 
-
+# Reimplemented
 class MatMul2(RelProp):
     def relprop(self, R):
         '''
@@ -183,6 +180,7 @@ class MatMul2(RelProp):
         return torch.einsum('bhij,bhjd->bhid', X[0], X[1])
 
 
+# Not reimplemented. Used only for orignal LRP baseline 
 class Conv2d(nn.Conv2d, RelProp):
     def gradprop2(self, DY, weight):
         Z = self.forward(self.X)

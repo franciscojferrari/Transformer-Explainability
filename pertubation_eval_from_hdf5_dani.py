@@ -81,9 +81,8 @@ def eval(model, imagenet_ds, sample_loader, device, args):
         # Save original shape
         org_shape = data.shape
 
-        if args.neg:
-            pass
-            #vis = -vis
+        #if args.neg:
+        #vis = -vis
 
         vis = vis.reshape(org_shape[0], -1)
 

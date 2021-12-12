@@ -7,16 +7,15 @@ perturbation_steps = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
 
 
 # vit_ours neg
-# perturbed_accuracy_mean = [0.81432, 0.79922, 0.7817, 0.75598, 0.71788, 0.65886, 0.57622, 0.46286, 0.31408, 0.13184, 0] 
+perturbed_accuracy_mean = [0.81432, 0.79922, 0.7817, 0.75598, 0.71788, 0.65886, 0.57622, 0.46286, 0.31408, 0.13184, 0] 
 # vit_ours neg orginal predictions
-#perturbed_accuracy_mean = [1, 0.91374, 0.881, 0.84296, 0.7943, 0.72446, 0.6294, 0.50392, 0.34044, 0.14204, 0] 
+perturbed_accuracy_mean = [1, 0.91374, 0.881, 0.84296, 0.7943, 0.72446, 0.6294, 0.50392, 0.34044, 0.14204, 0] 
 
 
 # vit_ours pos
-perturbed_accuracy_mean = [0.81432, 0.63082, 0.47878, 0.34118, 0.2236, 0.1346, 0.07262, 0.03336, 0.01374, 0.00476, 0]
+perturbed_accuracy_mean = [0.81432, 0.63016, 0.47856, 0.34242, 0.22296, 0.13578, 0.0724, 0.03388, 0.01356, 0.00464, 0]
 # vit_ours pos orginal predictions
-#perturbed_accuracy_mean = [1, 0.65944, 0.48794, 0.34304, 0.22218, 0.1326, 0.071, 0.03274, 0.0135, 0.00456, 0]
-
+perturbed_accuracy_mean = [1, 0.6599, 0.4882, 0.3441, 0.22202, 0.1329, 0.07042, 0.03296, 0.0132, 0.0044, 0]
 
 
 # vit_ours 1/3 neg
@@ -44,15 +43,26 @@ perturbed_accuracy_mean = [0.81432, 0.63082, 0.47878, 0.34118, 0.2236, 0.1346, 0
 # Rollout - vit ours pos original prediction
 # perturbed_accuracy_mean = [1, 0.70446, 0.53758, 0.3931, 0.27006, 0.1668, 0.09368, 0.04486, 0.01842, 0.0054, 0]
 
-# Partial LRP - vit ours neg
+# LRP - vit ours neg
 # perturbed_accuracy_mean = [0.81432, 0.76928, 0.73244, 0.69184, 0.63948, 0.56702, 0.46976, 0.3446, 0.19628, 0.05924, 0] 
-# Partial LRP - vit ours neg original prediction
+# LRP - vit ours neg original prediction
 # perturbed_accuracy_mean = [1, 0.84746, 0.79418, 0.743, 0.68054, 0.60078, 0.49284, 0.3619, 0.20548, 0.06176, 0]
 
-# Partial LRP - vit ours pos
+# LRP - vit ours pos
 # perturbed_accuracy_mean = [0.81432, 0.7514, 0.67606, 0.59874, 0.51452, 0.42524, 0.33736, 0.23904, 0.13444, 0.03706, 0]
-# Partial LRP - vit ours pos original prediction
+# LRP - vit ours pos original prediction
 # perturbed_accuracy_mean = [1, 0.82602, 0.73088, 0.6406, 0.54534, 0.44804, 0.35364, 0.2508, 0.13982, 0.03866, 0]
+
+# Partial LRP - vit ours neg
+# perturbed_accuracy_mean = [0.81432, 0.7931, 0.7673, 0.7283, 0.67602, 0.59924, 0.50492, 0.38456, 0.24858, 0.10036, 0] 
+# Partial LRP - vit ours neg original prediction
+# perturbed_accuracy_mean = [1, 0.89822, 0.84988, 0.7959, 0.7322, 0.64416, 0.53804, 0.40634, 0.26194, 0.10446, 0]
+
+# Partial LRP - vit ours pos
+# perturbed_accuracy_mean = [0.81432, 0.664, 0.53254, 0.40498, 0.28812, 0.18988, 0.11472, 0.05818, 0.02438, 0.00718, 0]
+# Partial LRP - vit ours pos original prediction
+# perturbed_accuracy_mean = [1, 0.71984, 0.56588, 0.42516, 0.30162, 0.19758, 0.11854, 0.05958, 0.02428, 0.00728, 0]
+
 
 # GradCAM - neg
 # perturbed_accuracy_mean = [0.81432, 0.79346, 0.74994, 0.6807, 0.58306, 0.45922, 0.33518, 0.2148, 0.11436, 0.03876,0]
@@ -62,6 +72,17 @@ perturbed_accuracy_mean = [0.81432, 0.63082, 0.47878, 0.34118, 0.2236, 0.1346, 0
 # perturbed_accuracy_mean = [0.81432, 0.72076, 0.64598, 0.5715, 0.49384, 0.41376, 0.32942, 0.24482, 0.14402, 0.04708, 0] 
 # GradCAM - pos, original prediction
 #perturbed_accuracy_mean = [1, 0.78424, 0.6872, 0.59992, 0.51422, 0.42752, 0.33808, 0.24938, 0.14644, 0.04784, 0]
+
+# Softmax - neg
+#perturbed_accuracy_mean = [0.81432, 0.79992, 0.78184, 0.75678, 0.71776, 0.65806, 0.57496, 0.46228, 0.31384, 0.13194, 0]
+# Softmax - neg, original prediction
+#perturbed_accuracy_mean = [1, 0.91522, 0.88138, 0.84368, 0.79452, 0.72494, 0.62848, 0.504, 0.34066, 0.1423, 0]
+# Softmax - pos 
+#perturbed_accuracy_mean = [0.81432, 0.63202, 0.4789, 0.34214, 0.22368, 0.13498, 0.07242, 0.03324, 0.01312, 0.00462, 0]
+# Softmax - pos, original prediction
+perturbed_accuracy_mean = [1, 0.66004, 0.48768, 0.34362, 0.22278, 0.13228, 0.07114, 0.0322, 0.0127, 0.00452, 0]
+
+
 
 ###### ABLATION STUDY ######
 # 1001 images, "last_layer". AUC: 0.6905
@@ -74,6 +95,12 @@ perturbed_accuracy_mean = [0.81432, 0.63082, 0.47878, 0.34118, 0.2236, 0.1346, 0
 #perturbed_accuracy_mean = [0.92207, 0.9040959, 0.88311688, 0.85814186, 0.83616384, 0.79120879, 0.74125874, 0.66933067, 0.52947053, 0.26473526, 0]
 # 1001 images, "transformer_attribution", neg, original prediction. Checked that it is not random (got the exact same twice) AUC:   0.7271
 #perturbed_accuracy_mean = [1, 0.94905095, 0.92807193, 0.8961039,  0.87912088, 0.82617383, 0.77622378, 0.6973027,  0.54545455, 0.27372627, 0]
+
+# #### SOFTMAX ####
+# perturbed_accuracy_mean = [0.92207, 0.90609391, 0.88011988, 0.85614386, 0.82517483, 0.79320679, 0.73526474, 0.67032967, 0.52647353, 0.27372627, 0]
+# perturbed_accuracy_mean = [1, 0.95604396, 0.92807193, 0.8981019, 0.87012987, 0.82817183, 0.76723277, 0.7032967,  0.54345654, 0.28271728, 0]
+
+
 
 # 1001 images, "transformer_attribution". pos. AUC: 0.2498
 #perturbed_accuracy_mean = [0.9220, 0.71628372, 0.53346653, 0.35264735, 0.21978022, 0.11688312, 0.06393606, 0.02597403, 0.00899101, 0, 0]
