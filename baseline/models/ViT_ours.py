@@ -172,11 +172,13 @@ class Attention(nn.Module):
         #(cam1_2, cam_v_2) = self.matmul2.relprop(cam, **kwargs)
         (cam1, cam_v) = self.matmul2_custom.relprop(cam)
         #print('%d\t%d' % (torch.equal(cam1, cam1_2), torch.equal(cam_v, cam_v_2)))
-
-        cam1 /= 2
-        cam_v /= 2
-        #cam1 = cam1 * 2/3
-        #cam_v /= 3
+        use_1_3 = kwargs.get('use_1_3', False)
+        if use_1_3:
+            cam1 = cam1 * 2/3
+            cam_v /= 3
+        else:
+            cam1 /= 2
+            cam_v /= 2
 
         self.save_v_cam(cam_v)
         self.save_attn_cam(cam1)
@@ -191,6 +193,7 @@ class Attention(nn.Module):
         #print('%d\t%d' % (torch.equal(cam_q, cam_q2), torch.equal(cam_k, cam_k2)))
         cam_q /= 2
         cam_k /= 2
+
         # TODO: Experiment with normalizing with 1/3 given the signal split in to 3
 
         cam_qkv = rearrange(
@@ -396,7 +399,7 @@ class VisionTransformer(nn.Module):
             cam = compute_rollout_attention(attn_cams, start_layer=start_layer)
             cam = cam[:, 0, 1:]
             return cam
-        
+
         # Full LRP
         if method == "lrp":
             (cam, _) = self.add.relprop(cam, **kwargs)
@@ -406,7 +409,7 @@ class VisionTransformer(nn.Module):
             cam = cam.sum(dim=1)
             return cam
 
-        # Partial LRP: only consider last layer attention   
+        # Partial LRP: only consider last layer attention
         elif method == "partial_lrp":
             cam = self.blocks[-1].attn.get_attn_cam()
             cam = cam[0].reshape(-1, cam.shape[-1], cam.shape[-1])

@@ -15,39 +15,6 @@ from argparse import ArgumentParser
 import logger
 
 
-def show_cam_on_image(img, mask):
-    heatmap = cv2.applyColorMap(np.uint8(255 * mask), cv2.COLORMAP_JET)
-    heatmap = np.float32(heatmap) / 255
-    cam = heatmap + np.float32(img)
-    cam = cam / np.max(cam)
-    return cam
-
-
-def generate_visualization(original_image, attribution_generator, class_index=None, device="cuda"):
-    transformer_attribution = attribution_generator.generate_LRP(
-        original_image.unsqueeze(0).to(device),
-        method="transformer_attribution", index=class_index,
-        device=device
-    ).detach()
-
-    transformer_attribution = transformer_attribution.reshape(1, 1, 14, 14)
-    transformer_attribution = torch.nn.functional.interpolate(
-        transformer_attribution, scale_factor=16, mode='bilinear')
-    transformer_attribution = transformer_attribution.reshape(
-        224, 224).to(device).data.cpu().numpy()
-
-    transformer_attribution = (transformer_attribution - transformer_attribution.min()
-                               ) / (transformer_attribution.max() - transformer_attribution.min())
-    image_transformer_attribution = original_image.permute(1, 2, 0).data.cpu().numpy()
-    image_transformer_attribution = (
-        image_transformer_attribution - image_transformer_attribution.min()) / (
-        image_transformer_attribution.max() - image_transformer_attribution.min())
-    vis = show_cam_on_image(image_transformer_attribution, transformer_attribution)
-    vis = np.uint8(255 * vis)
-    vis = cv2.cvtColor(np.array(vis), cv2.COLOR_RGB2BGR)
-    return vis
-
-
 def compute_saliency_and_save(images, path, expl_gen, device):
     first = True
 
@@ -96,7 +63,8 @@ def compute_saliency_and_save(images, path, expl_gen, device):
                 Res = expl_gen.generate_cam_attn(data,  index=index, device=device)
             else:
                 Res = expl_gen.generate_LRP(
-                    data, start_layer=1, method=args.method, index=index, device=device)
+                    data, start_layer=1, method=args.method, index=index, device=device,
+                    use_1_3=args.use_1_3)
 
             Res = (Res - Res.min()) / (Res.max() - Res.min())
 
@@ -143,62 +111,6 @@ def generate_heatmaps(args):
     compute_saliency_and_save(imagenet, args.save_path, attribution_generator, device)
 
 
-def main_test():
-    normalize = transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
-    transform = transforms.Compose([
-        transforms.Resize(256),
-        transforms.CenterCrop(224),
-        transforms.ToTensor(),
-        normalize,
-    ])
-    # initialize ViT pretrained
-
-    cuda = torch.cuda.is_available()
-    device = torch.device("cuda" if cuda else "cpu")
-
-    # model = vit_base_patch16_224().to(device)
-    model = our_vit_base_patch16_224().to(device)
-    model.eval()
-    attribution_generator = ExplanationGenerator(model)
-    image = Image.open('samples/catdog.png')
-    dog_cat_image = transform(image)
-
-    fig, axs = plt.subplots(1, 3)
-    axs[0].imshow(image)
-    axs[0].axis('off')
-
-    output = model(dog_cat_image.unsqueeze(0).to(device))
-
-    visualize = False
-
-    if visualize:
-        # cat - the predicted class
-        cat = generate_visualization(
-            dog_cat_image, attribution_generator=attribution_generator, device=device)
-
-        # dog
-        # generate visualization for class 243: 'bull mastiff'
-        dog = generate_visualization(
-            dog_cat_image, attribution_generator=attribution_generator, class_index=243,
-            device=device)
-
-        axs[1].imshow(cat)
-        axs[1].axis('off')
-        axs[2].imshow(dog)
-        axs[2].axis('off')
-        plt.show()
-    else:
-        images = []
-        image = Image.open('samples/dogbird.png')
-        dog_bird_image = transform(image)
-
-        images.append((dog_cat_image.unsqueeze(0), torch.tensor(282)))
-        # images.append((dog_cat_image, 243))
-        images.append((dog_bird_image.unsqueeze(0), torch.tensor(161)))
-        # images.append((dog_bird_image, 87))
-        compute_saliency_and_save(images, "results", attribution_generator, device)
-
-
 if __name__ == "__main__":
     parser = ArgumentParser(description='Train a segmentation')
     parser.add_argument('--batch-size', type=int,
@@ -216,15 +128,19 @@ if __name__ == "__main__":
                         # required=True,
                         default="transformer_attribution",
                         help='')
+    parser.add_argument('--use-1-3', type=bool,
+                        # required=True,
+                        default=False,
+                        help='')
 
     args = parser.parse_args()
     args.imagenet_validation_path = os.path.join(args.work_path, "imgnet_val")
 
-    args.save_path = os.path.join(args.work_path, "results", args.vit_model, args.method)
+    mthd = args.method + "_13" if args.use_1_3 else args.method
+    args.save_path = os.path.join(args.work_path, "results", args.vit_model, mthd)
     os.makedirs(args.save_path, exist_ok=True)
 
     assert args.vit_model == "ours" or args.vit_model == "paper", "please select ours or paper"
-
     generate_heatmaps(args)
 
 # python generate_heatmaps.py --imagenet-validation-path /home/tf-exp-o-data/imgnet_val/ --save-path /home/tf-exp-o-data/results/ --vit-model ours

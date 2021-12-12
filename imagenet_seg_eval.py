@@ -26,7 +26,7 @@ import matplotlib.pyplot as plt
 import torch.nn.functional as F
 
 
-def eval_batch(image, labels, evaluator, index, device, lrp, results_dir, experiment_dir, args):
+def eval_batch(image, labels, evaluator, index, device, expl_gen, results_dir, experiment_dir, args):
     evaluator.zero_grad()
     # Save input image
     if args.save_img:
@@ -44,17 +44,13 @@ def eval_batch(image, labels, evaluator, index, device, lrp, results_dir, experi
     image.requires_grad = True
 
     image = image.requires_grad_()
-    predictions = evaluator(image)
+    # predictions = evaluator(image)
 
-    Res = lrp.generate_LRP(
-        image.to(device),
-        start_layer=1,
-        device=device,
-        method="transformer_attribution"
-    ).reshape(args.batch_size, 1, 14, 14)
-
-    Res = torch.nn.functional.interpolate(
-        Res, scale_factor=16, mode='bilinear', align_corners=False).to(device)
+    if args.method == 'attn_gradcam':
+        Res = expl_gen.generate_cam_attn(image.to(device), device=device)
+    else:
+        Res = expl_gen.generate_LRP(image.to(device), start_layer=1,
+                                    method=args.method, device=device)
 
     # threshold between FG and BG is the mean
     Res = (Res - Res.min()) / (Res.max() - Res.min())
@@ -83,14 +79,14 @@ def eval_batch(image, labels, evaluator, index, device, lrp, results_dir, experi
 
     if args.save_img:
         # Save predicted mask
-        mask = F.interpolate(Res_1, [64, 64], mode='bilinear')
+        mask = F.interpolate(Res_1, [64, 64], mode='bilinear', align_corners=False)
         mask = mask[0].squeeze().data.cpu().numpy()
         # mask = Res_1[0].squeeze().data.cpu().numpy()
         mask = 255 * mask
         mask = mask.astype('uint8')
         imageio.imsave(os.path.join(args.exp_img_path, 'mask_' + str(index) + '.jpg'), mask)
 
-        relevance = F.interpolate(Res, [64, 64], mode='bilinear')
+        relevance = F.interpolate(Res, [64, 64], mode='bilinear', align_corners=False)
         relevance = relevance[0].permute(1, 2, 0).data.cpu().numpy()
         # relevance = Res[0].permute(1, 2, 0).data.cpu().numpy()
         hm = np.sum(relevance, axis=-1)
@@ -122,12 +118,16 @@ def eval_batch(image, labels, evaluator, index, device, lrp, results_dir, experi
 def imagenet_seg_dataloader(imagenet_seg_path: str, batch_size: int = 1):
     normalize = transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
     test_img_trans = transforms.Compose([
-        transforms.Resize((224, 224)),
+        # transforms.Resize((224, 224)),
+        transforms.Resize(256),
+        transforms.CenterCrop(224),
         transforms.ToTensor(),
         normalize,
     ])
     test_lbl_trans = transforms.Compose([
-        transforms.Resize((224, 224), Image.NEAREST),
+        # transforms.Resize((224, 224), Image.NEAREST),
+        transforms.Resize((256, 256), Image.NEAREST),
+        transforms.CenterCrop(224)
     ])
 
     ds = Imagenet_Segmentation(imagenet_seg_path,
@@ -146,7 +146,7 @@ def imagenet_seg_dataloader(imagenet_seg_path: str, batch_size: int = 1):
 
 def run_seg_eval(args):
 
-    directory = os.path.join(args.work_path, 'run')
+    directory = os.path.join(args.work_path, 'run', args.method)
     runs = sorted(glob.glob(os.path.join(directory, 'experiment_*')))
     run_id = int(runs[-1].split('_')[-1]) + 1 if runs else 0
 
@@ -178,8 +178,8 @@ def run_seg_eval(args):
     else:
         model = paper_vit_base_patch16_224().to(device)
 
-    attribution_generator = ExplanationGenerator(model)
     model.eval()
+    attribution_generator = ExplanationGenerator(model)
 
     total_inter, total_union, total_correct, total_label = np.int64(
         0), np.int64(0), np.int64(0), np.int64(0)
@@ -270,6 +270,11 @@ if __name__ == "__main__":
                         # required=True,
                         default="/home/tf-exp-o-data/",
                         help='')
+    parser.add_argument('--method', type=str,
+                        # required=True,
+                        default="transformer_attribution",
+                        help='')
+
     _args = parser.parse_args()
     _args.batch_size = 1
 

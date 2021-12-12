@@ -145,3 +145,4 @@ visualizations/transformer_attribution/top/not_ablation/results.hdf5
 BertForSequenceClassification/*
 visualizations/my_results/results_new.hdf5
 *.hdf5
+images/*
