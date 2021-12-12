@@ -74,8 +74,11 @@ class Mlp(nn.Module):
         return x
 
     def relprop(self, cam, **kwargs):
+
+        use_eps_rule = kwargs.pop("use_eps_rule", False)
+
         cam = self.drop.relprop(cam, **kwargs)
-        cam = self.fc2.relprop(cam, use_eps_rule=False, **kwargs)
+        cam = self.fc2.relprop(cam, use_eps_rule=use_eps_rule, **kwargs)
         # cam = self.act.relprop(cam, **kwargs)
         cam = self.fc1.relprop(cam, **kwargs)
         return cam
@@ -164,6 +167,7 @@ class Attention(nn.Module):
 
     def relprop(self, cam, **kwargs):
         # cam = self.proj_drop.relprop(cam, **kwargs)
+        use_1_3 = kwargs.pop('use_1_3', False)
         cam = self.proj.relprop(cam, **kwargs)
         cam = rearrange(cam, 'b n (h d) -> b h n d', h=self.num_heads)
 
@@ -172,7 +176,7 @@ class Attention(nn.Module):
         #(cam1_2, cam_v_2) = self.matmul2.relprop(cam, **kwargs)
         (cam1, cam_v) = self.matmul2_custom.relprop(cam)
         #print('%d\t%d' % (torch.equal(cam1, cam1_2), torch.equal(cam_v, cam_v_2)))
-        use_1_3 = kwargs.get('use_1_3', False)
+
         if use_1_3:
             cam1 = cam1 * 2/3
             cam_v /= 3
@@ -233,8 +237,11 @@ class Block(nn.Module):
         return x
 
     def relprop(self, cam, **kwargs):
+        use_1_3 = kwargs.pop("use_1_3", False)
+        use_eps_rule = kwargs.pop("use_eps_rule", False)
+
         (cam1, cam2) = self.add2.relprop(cam, **kwargs)
-        cam2 = self.mlp.relprop(cam2, **kwargs)
+        cam2 = self.mlp.relprop(cam2, use_eps_rule=use_eps_rule, **kwargs)
         # cam2 = self.norm2.relprop(cam2, **kwargs)
         #cam = self.clone2.relprop((cam1, cam2), **kwargs)
         # CHECKED: equivalent using clone. relprop is almost the same (but for some small differences due to numerical precision)
@@ -242,7 +249,7 @@ class Block(nn.Module):
         # Also, we don't need a clone function bc we don't need to save X in the forward loop
 
         (cam1, cam2) = self.add1.relprop(cam, **kwargs)
-        cam2 = self.attn.relprop(cam2, **kwargs)
+        cam2 = self.attn.relprop(cam2, use_1_3=use_1_3, **kwargs)
         # cam2 = self.norm1.relprop(cam2, **kwargs)
         #cam = self.clone1.relprop((cam1, cam2), **kwargs)
         cam = cam1 + cam2
@@ -369,6 +376,7 @@ class VisionTransformer(nn.Module):
             device='cuda', **kwargs):
 
         # (Relevance · Attention) only in the last block
+        use_1_3 = kwargs.pop("use_1_3", False)
         if method == "last_layer":
             cam = self.head.relprop(cam, **kwargs)
             cam = self.pool.relprop(cam, device=device, **kwargs)
@@ -386,7 +394,7 @@ class VisionTransformer(nn.Module):
         cam = self.pool.relprop(cam, device=device, **kwargs)
         # cam = self.norm.relprop(cam, **kwargs)
         for blk in reversed(self.blocks):
-            cam = blk.relprop(cam, **kwargs)
+            cam = blk.relprop(cam, use_1_3=use_1_3, **kwargs)
 
         # gradient rollout
         if method == "rollout":
