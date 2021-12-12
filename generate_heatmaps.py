@@ -71,14 +71,20 @@ def compute_saliency_and_save(images, path, expl_gen, device):
             data_cam[-data.shape[0]:] = Res.data.cpu().numpy()
 
 
-def imagenet_dataloader(imagenet_validation_path: str, batch_size: int = 1):
+def imagenet_dataloader(imagenet_validation_path: str, batch_size: int = 1, NCC=False):
     normalize = transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
-    transform = transforms.Compose([
-        transforms.Resize(256),
-        transforms.CenterCrop(224),
-        transforms.ToTensor(),
-        normalize,
-    ])
+    if NCC:
+        transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+        ])
+    else:
+        transform = transforms.Compose([
+            transforms.Resize(256),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            normalize,
+        ])
 
     imagenet_ds = ImageNet(imagenet_validation_path, split='val',
                            download=False, transform=transform)
@@ -106,7 +112,7 @@ def generate_heatmaps(args):
 
     model.eval()
     attribution_generator = ExplanationGenerator(model)
-    imagenet = imagenet_dataloader(args.imagenet_validation_path, args.batch_size)
+    imagenet = imagenet_dataloader(args.imagenet_validation_path, args.batch_size, args.NCC)
 
     compute_saliency_and_save(imagenet, args.save_path, attribution_generator, device)
 
@@ -122,7 +128,7 @@ if __name__ == "__main__":
                         help='')
     parser.add_argument('--vit-model', type=str,
                         # required=True,
-                        default="paper",
+                        default="ours",
                         help='ours or paper')
     parser.add_argument('--method', type=str,
                         # required=True,
@@ -132,11 +138,16 @@ if __name__ == "__main__":
                         # required=True,
                         default=False,
                         help='')
+    parser.add_argument('--NCC', type=bool,
+                        # required=True,
+                        default=True,
+                        help='')
 
     args = parser.parse_args()
     args.imagenet_validation_path = os.path.join(args.work_path, "imgnet_val")
 
     mthd = args.method + "_13" if args.use_1_3 else args.method
+    mthd = args.method + "_NCC" if args.NCC else args.method
     args.save_path = os.path.join(args.work_path, "results", args.vit_model, mthd)
     os.makedirs(args.save_path, exist_ok=True)
 

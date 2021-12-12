@@ -71,8 +71,11 @@ class Mlp(nn.Module):
         return x
 
     def relprop(self, cam, **kwargs):
+
+        use_eps_rule = kwargs.pop("use_eps_rule", False)
+
         cam = self.drop.relprop(cam, **kwargs)
-        cam = self.fc2.relprop(cam, use_eps_rule=False, **kwargs)
+        cam = self.fc2.relprop(cam, use_eps_rule=use_eps_rule, **kwargs)
         cam = self.fc1.relprop(cam, **kwargs)
         return cam
 
@@ -201,14 +204,17 @@ class Block(nn.Module):
         return x
 
     def relprop(self, cam, **kwargs):
+        use_1_3 = kwargs.pop("use_1_3", False)
+        use_eps_rule = kwargs.pop("use_eps_rule", False)
+
         # second skip connection
         (cam1, cam2) = self.add2.relprop(cam, **kwargs)
-        cam2 = self.mlp.relprop(cam2, **kwargs)
+        cam2 = self.mlp.relprop(cam2, use_eps_rule=use_eps_rule, **kwargs)
         cam = cam1 + cam2
 
         # first skip connection
         (cam1, cam2) = self.add1.relprop(cam, **kwargs)
-        cam2 = self.attn.relprop(cam2, **kwargs)
+        cam2 = self.attn.relprop(cam2, use_1_3=use_1_3, **kwargs)
         cam = cam1 + cam2
 
         return cam
@@ -330,6 +336,7 @@ class VisionTransformer(nn.Module):
             device='cuda', **kwargs):
 
         # (Relevance · Attention) only in the last block
+        use_1_3 = kwargs.pop("use_1_3", False)
         if method == "last_layer":
             cam = self.head.relprop(cam, **kwargs)
             cam = self.pool.relprop(cam, device=device, **kwargs)
@@ -346,7 +353,7 @@ class VisionTransformer(nn.Module):
         cam = self.head.relprop(cam, **kwargs)
         cam = self.pool.relprop(cam, device=device, **kwargs)
         for blk in reversed(self.blocks):
-            cam = blk.relprop(cam, **kwargs)
+            cam = blk.relprop(cam, use_1_3=use_1_3, **kwargs)
 
         # rollout over relevance cams
         if method == "rollout":
