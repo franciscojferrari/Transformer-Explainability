@@ -115,20 +115,28 @@ def eval_batch(image, labels, evaluator, index, device, expl_gen, results_dir, e
     return batch_correct, batch_label, batch_inter, batch_union, batch_ap, batch_f1, pred, target
 
 
-def imagenet_seg_dataloader(imagenet_seg_path: str, batch_size: int = 1):
+def imagenet_seg_dataloader(imagenet_seg_path: str, batch_size: int = 1, NCC=False):
     normalize = transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
-    test_img_trans = transforms.Compose([
-        # transforms.Resize((224, 224)),
-        transforms.Resize(256),
-        transforms.CenterCrop(224),
-        transforms.ToTensor(),
-        normalize,
-    ])
-    test_lbl_trans = transforms.Compose([
-        # transforms.Resize((224, 224), Image.NEAREST),
-        transforms.Resize((256, 256), Image.NEAREST),
-        transforms.CenterCrop(224)
-    ])
+    if NCC:
+        test_img_trans = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            normalize
+        ])
+        test_lbl_trans = transforms.Compose([
+            transforms.Resize((224, 224), Image.NEAREST)
+        ])
+    else:
+        test_img_trans = transforms.Compose([
+            transforms.Resize(256),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            normalize,
+        ])
+        test_lbl_trans = transforms.Compose([
+            transforms.Resize((256, 256), Image.NEAREST),
+            transforms.CenterCrop(224)
+        ])
 
     ds = Imagenet_Segmentation(imagenet_seg_path,
                                transform=test_img_trans, target_transform=test_lbl_trans)
@@ -137,7 +145,7 @@ def imagenet_seg_dataloader(imagenet_seg_path: str, batch_size: int = 1):
         ds,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=50,
+        num_workers=10,
         pin_memory=True,
         drop_last=False
     )
@@ -146,7 +154,9 @@ def imagenet_seg_dataloader(imagenet_seg_path: str, batch_size: int = 1):
 
 def run_seg_eval(args):
 
-    directory = os.path.join(args.work_path, 'run', args.method)
+    mthd = args.method + "_NCC" if args.NCC else args.method
+
+    directory = os.path.join(args.work_path, 'run', mthd)
     runs = sorted(glob.glob(os.path.join(directory, 'experiment_*')))
     run_id = int(runs[-1].split('_')[-1]) + 1 if runs else 0
 
@@ -187,7 +197,7 @@ def run_seg_eval(args):
 
     predictions, targets = [], []
 
-    imagenet_seg = imagenet_seg_dataloader(args.imagenet_seg_path, args.batch_size)
+    imagenet_seg = imagenet_seg_dataloader(args.imagenet_seg_path, args.batch_size, args.NCC)
 
     iterator = tqdm(imagenet_seg)
 
@@ -273,6 +283,12 @@ if __name__ == "__main__":
     parser.add_argument('--method', type=str,
                         # required=True,
                         default="transformer_attribution",
+                        help='')
+
+    parser.add_argument('--NCC',
+                        # required=True,
+                        default=False,
+                        action='store_true',
                         help='')
 
     _args = parser.parse_args()

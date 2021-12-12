@@ -179,8 +179,9 @@ if __name__ == "__main__":
     parser.add_argument('--batch-size', type=int,
                         default=16,
                         help='')
-    parser.add_argument('--neg', type=bool,
+    parser.add_argument('--neg',
                         default=False,
+                        action='store_true',
                         help='')
     parser.add_argument('--scale', type=str,
                         default='per',
@@ -205,6 +206,11 @@ if __name__ == "__main__":
                         # required=True,
                         default="transformer_attribution",
                         help='')
+    parser.add_argument('--NCC',
+                        # required=True,
+                        default=False,
+                        action='store_true',
+                        help='')
 
     args = parser.parse_args()
 
@@ -212,8 +218,10 @@ if __name__ == "__main__":
     os.makedirs(os.path.join(args.work_path, 'experiments/perturbations'), exist_ok=True)
 
     exp_name = 'neg_per' if args.neg else 'pos_per'
+    mthd = args.method + "_NCC" if args.NCC else args.method
+
     args.runs_dir = os.path.join(
-        args.work_path, 'experiments/perturbations/{}/{}/{}'.format(args.vit_model, args.method, exp_name))
+        args.work_path, 'experiments/perturbations/{}/{}/{}'.format(args.vit_model, mthd, exp_name))
 
     if args.wrong:
         args.runs_dir += '_wrong'
@@ -223,6 +231,6 @@ if __name__ == "__main__":
     args.experiment_dir = os.path.join(args.runs_dir, 'experiment_{}'.format(str(experiment_id)))
     os.makedirs(args.experiment_dir, exist_ok=True)
 
-    args.vis_method_dir = os.path.join(args.work_path, "results", args.vit_model, args.method)
+    args.vis_method_dir = os.path.join(args.work_path, "results", args.vit_model, mthd)
 
     pertturbation_eval(args)
