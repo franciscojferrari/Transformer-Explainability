@@ -33,7 +33,7 @@ def get_f1_scores(predict, target, ignore_index=-1):
 
     total = []
     for p, t in zip(pb, tb):
-        total.append(np.nan_to_num(f1_score(t, p)))
+        total.append(np.nan_to_num(f1_score(t, p, zero_division=0)))
 
     return total
 

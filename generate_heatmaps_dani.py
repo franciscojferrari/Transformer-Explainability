@@ -33,7 +33,7 @@ def generate_visualization(original_image, attribution_generator, class_index=No
 
     transformer_attribution = transformer_attribution.reshape(1, 1, 14, 14)
     transformer_attribution = torch.nn.functional.interpolate(
-        transformer_attribution, scale_factor=16, mode='bilinear')
+        transformer_attribution, scale_factor=16, mode='bilinear', align_corners=False)
     transformer_attribution = transformer_attribution.reshape(
         224, 224).to(device).data.cpu().numpy()
 
@@ -74,7 +74,7 @@ def compute_saliency_and_save(images, path, lrp, rise, device):
                                        dtype=np.int32,
                                        compression="gzip")
         for batch_idx, (data, target) in enumerate(tqdm(images)):
-            
+
             if first:
                 first = False
                 data_cam.resize(data_cam.shape[0] + data.shape[0] - 1, axis=0)
@@ -94,11 +94,12 @@ def compute_saliency_and_save(images, path, lrp, rise, device):
             data.requires_grad_()
 
             index = None
-            
+
             if args.method == 'rise':
                 Res = rise(data)
             else:
-                Res = lrp.generate_LRP(data, start_layer=1, method=args.method, index=index, device=device)
+                Res = lrp.generate_LRP(data, start_layer=1, method=args.method,
+                                       index=index, device=device)
 
             Res = (Res - Res.min()) / (Res.max() - Res.min())
 
@@ -147,7 +148,7 @@ def generate_heatmaps(args):
     rise = None
     if args.method == 'rise':
         rise = RISE(model, (224, 224), device)
-        rise.generate_masks(N=2000,s=8, p1=0.5)
+        rise.generate_masks(N=2000, s=8, p1=0.5)
 
     imagenet = imagenet_dataloader(args.imagenet_validation_path, args.batch_size)
 
