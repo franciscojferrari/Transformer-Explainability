@@ -1100,7 +1100,7 @@ def main():
     heatmap_rise = rise(dog_cat_image.unsqueeze(0).to(device))
 
     '''
-    raw_attr_paper = gen_raw_attr(paper_base_model, dog_cat_image, device, model_name='Original paper implementation')
+    #raw_attr_paper = gen_raw_attr(paper_base_model, dog_cat_image, device, model_name='Original paper implementation')
     raw_attr_ours = gen_raw_attr(our_base_model, dog_cat_image, device, model_name='Our implementation')
 
     if torch.equal(raw_attr_paper, raw_attr_ours):

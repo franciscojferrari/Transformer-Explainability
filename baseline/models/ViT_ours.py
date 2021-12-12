@@ -97,10 +97,10 @@ class Attention(nn.Module):
         self.matmul2_custom = MatMul2()
 
         self.qkv = Linear(dim, dim * 3, bias=qkv_bias)
-        self.attn_drop = nn.Dropout(attn_drop)  # Dropout(attn_drop)
+        self.attn_drop = nn.Dropout(attn_drop)  
         self.proj = Linear(dim, dim)
-        self.proj_drop = nn.Dropout(proj_drop)  # Dropout(proj_drop)
-        self.softmax = nn.Softmax(dim=-1)  # Softmax(dim=-1)
+        self.proj_drop = nn.Dropout(proj_drop) 
+        self.softmax = nn.Softmax(dim=-1)  
 
         self.attn_cam = None
         self.attn = None
@@ -243,6 +243,7 @@ class Block(nn.Module):
         # cam2 = self.norm1.relprop(cam2, **kwargs)
         #cam = self.clone1.relprop((cam1, cam2), **kwargs)
         cam = cam1 + cam2
+
         return cam
 
 

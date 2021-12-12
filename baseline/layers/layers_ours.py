@@ -53,7 +53,7 @@ class GELU(nn.GELU, RelProp):
 
 
 class Softmax(nn.Softmax, RelProp):
-    pass
+    pass    
 
 
 class LayerNorm(nn.LayerNorm, RelProp):
