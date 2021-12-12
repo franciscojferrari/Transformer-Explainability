@@ -6,7 +6,6 @@ import torch
 import torch.nn as nn
 from einops import rearrange
 from baseline.layers.layers_ours import *
-from baseline.layers.layers_paper import Clone, einsum  # imported for comparison purposes
 from baseline.layers.layer_helper import to_2tuple, trunc_normal_
 import torch.utils.model_zoo as model_zoo
 import pdb
@@ -47,8 +46,6 @@ def compute_rollout_attention(all_layer_matrices, start_layer=0):
         batch_size, num_tokens, num_tokens).to(
         all_layer_matrices[0].device)
     all_layer_matrices = [all_layer_matrices[i] + eye for i in range(len(all_layer_matrices))]
-    # all_layer_matrices = [all_layer_matrices[i] / all_layer_matrices[i].sum(dim=-1, keepdim=True)
-    #                       for i in range(len(all_layer_matrices))]
     joint_attention = all_layer_matrices[start_layer]
     for i in range(start_layer+1, len(all_layer_matrices)):
         joint_attention = all_layer_matrices[i].bmm(joint_attention)
@@ -76,7 +73,6 @@ class Mlp(nn.Module):
     def relprop(self, cam, **kwargs):
         cam = self.drop.relprop(cam, **kwargs)
         cam = self.fc2.relprop(cam, use_eps_rule=False, **kwargs)
-        # cam = self.act.relprop(cam, **kwargs)
         cam = self.fc1.relprop(cam, **kwargs)
         return cam
 
@@ -86,15 +82,12 @@ class Attention(nn.Module):
         super().__init__()
         self.num_heads = num_heads
         head_dim = dim // num_heads
-        # NOTE scale factor was wrong in my original version, can set manually to be compat with prev weights
         self.scale = head_dim ** -0.5
 
         # A = Q*K^T
-        self.matmul1 = einsum('bhid,bhjd->bhij')
-        self.matmul1_custom = MatMul1()
+        self.matmul1 = MatMul1()
         # attn = A*V
-        self.matmul2 = einsum('bhij,bhjd->bhid')
-        self.matmul2_custom = MatMul2()
+        self.matmul2 = MatMul2()
 
         self.qkv = Linear(dim, dim * 3, bias=qkv_bias)
         self.attn_drop = nn.Dropout(attn_drop)  
@@ -146,8 +139,6 @@ class Attention(nn.Module):
         self.save_v(v)
 
         dots = self.matmul1([q, k]) * self.scale
-        dots = self.matmul1_custom([q, k]) * self.scale
-
         attn = self.softmax(dots)
         attn = self.attn_drop(attn)
 
@@ -155,7 +146,6 @@ class Attention(nn.Module):
         attn.register_hook(self.save_attn_gradients)
 
         out = self.matmul2([attn, v])
-        out = self.matmul2_custom([attn, v])
         out = rearrange(out, 'b h n d -> b n (h d)')
 
         out = self.proj(out)
@@ -163,17 +153,13 @@ class Attention(nn.Module):
         return out
 
     def relprop(self, cam, **kwargs):
-        # cam = self.proj_drop.relprop(cam, **kwargs)
         cam = self.proj.relprop(cam, **kwargs)
         cam = rearrange(cam, 'b n (h d) -> b h n d', h=self.num_heads)
 
         # attn = A*V
-        #(cam1, cam_v) = self.matmul2.relprop(cam, **kwargs)
-        #(cam1_2, cam_v_2) = self.matmul2.relprop(cam, **kwargs)
-        (cam1, cam_v) = self.matmul2_custom.relprop(cam)
-        #print('%d\t%d' % (torch.equal(cam1, cam1_2), torch.equal(cam_v, cam_v_2)))
-        use_1_3 = kwargs.get('use_1_3', False)
-        if use_1_3:
+        (cam1, cam_v) = self.matmul2.relprop(cam)
+        use_1_3 = kwargs.get('use_1_3', False)      # whether to normalize flows equally as 1/3
+        if use_1_3: 
             cam1 = cam1 * 2/3
             cam_v /= 3
         else:
@@ -183,18 +169,10 @@ class Attention(nn.Module):
         self.save_v_cam(cam_v)
         self.save_attn_cam(cam1)
 
-        # cam1 = self.attn_drop.relprop(cam1, **kwargs)
-        # cam1 = self.softmax.relprop(cam1, **kwargs)
-
         # A = Q*K^T
-        #(cam_q, cam_k) = self.matmul1.relprop(cam1, **kwargs)
-        #(cam_q2, cam_k2) = self.matmul1.relprop(cam1, **kwargs)
-        (cam_q, cam_k) = self.matmul1_custom.relprop(cam1)
-        #print('%d\t%d' % (torch.equal(cam_q, cam_q2), torch.equal(cam_k, cam_k2)))
+        (cam_q, cam_k) = self.matmul1.relprop(cam1)
         cam_q /= 2
         cam_k /= 2
-
-        # TODO: Experiment with normalizing with 1/3 given the signal split in to 3
 
         cam_qkv = rearrange(
             [cam_q, cam_k, cam_v],
@@ -207,25 +185,15 @@ class Block(nn.Module):
 
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, drop=0., attn_drop=0.):
         super().__init__()
-        self.norm1 = nn.LayerNorm(dim, eps=1e-6)  # LayerNorm(dim, eps=1e-6)
+        self.norm1 = nn.LayerNorm(dim, eps=1e-6)  
         self.attn = Attention(
             dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop)
-        self.norm2 = nn.LayerNorm(dim, eps=1e-6)  # LayerNorm(dim, eps=1e-6)
+        self.norm2 = nn.LayerNorm(dim, eps=1e-6) 
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, drop=drop)
 
         self.add1 = Add()
         self.add2 = Add()
-        #self.clone1 = Clone()
-        #self.clone2 = Clone()
-    '''
-    def forward(self, x):
-        x1, x2 = self.clone1(x, 2)
-        x = self.add1([x1, self.attn(self.norm1(x2))])
-        x1, x2 = self.clone2(x, 2)
-        x = self.add2([x1, self.mlp(self.norm2(x2))])
-        return x
-    '''
 
     def forward(self, x):
         x = self.add1([x, self.attn(self.norm1(x))])
@@ -233,18 +201,14 @@ class Block(nn.Module):
         return x
 
     def relprop(self, cam, **kwargs):
+        # second skip connection
         (cam1, cam2) = self.add2.relprop(cam, **kwargs)
         cam2 = self.mlp.relprop(cam2, **kwargs)
-        # cam2 = self.norm2.relprop(cam2, **kwargs)
-        #cam = self.clone2.relprop((cam1, cam2), **kwargs)
-        # CHECKED: equivalent using clone. relprop is almost the same (but for some small differences due to numerical precision)
         cam = cam1 + cam2
-        # Also, we don't need a clone function bc we don't need to save X in the forward loop
 
+        # first skip connection
         (cam1, cam2) = self.add1.relprop(cam, **kwargs)
         cam2 = self.attn.relprop(cam2, **kwargs)
-        # cam2 = self.norm1.relprop(cam2, **kwargs)
-        #cam = self.clone1.relprop((cam1, cam2), **kwargs)
         cam = cam1 + cam2
 
         return cam
@@ -307,17 +271,13 @@ class VisionTransformer(nn.Module):
                 drop=drop_rate, attn_drop=attn_drop_rate)
             for i in range(depth)])
 
-        self.norm = nn.LayerNorm(embed_dim)  # LayerNorm(embed_dim)
+        self.norm = nn.LayerNorm(embed_dim)  
         if mlp_head:
-            # paper diagram suggests 'MLP head', but results in 4M extra parameters vs paper
             self.head = Mlp(embed_dim, int(embed_dim * mlp_ratio), num_classes)
         else:
-            # with a single Linear layer as head, the param count within rounding of paper
             self.head = Linear(embed_dim, num_classes)
 
-        # FIXME not quite sure what the proper weight init is supposed to be,
-        # normal / trunc normal w/ std == .02 similar to other Bert like transformers
-        trunc_normal_(self.pos_embed, std=.02)  # embeddings same as weights?
+        trunc_normal_(self.pos_embed, std=.02)  
         trunc_normal_(self.cls_token, std=.02)
         self.apply(self._init_weights)
 
@@ -385,13 +345,11 @@ class VisionTransformer(nn.Module):
 
         cam = self.head.relprop(cam, **kwargs)
         cam = self.pool.relprop(cam, device=device, **kwargs)
-        # cam = self.norm.relprop(cam, **kwargs)
         for blk in reversed(self.blocks):
             cam = blk.relprop(cam, **kwargs)
 
-        # gradient rollout
+        # rollout over relevance cams
         if method == "rollout":
-            # cam rollout
             attn_cams = []
             for blk in self.blocks:
                 attn_heads = blk.attn.get_attn_cam().clamp(min=0)
@@ -419,7 +377,7 @@ class VisionTransformer(nn.Module):
             return cam
 
         # Our method
-        elif method == "transformer_attribution" or method == "grad":
+        elif method == "transformer_attribution":
             cams = []
             for blk in self.blocks:
                 grad = blk.attn.get_attn_gradients()
@@ -431,16 +389,6 @@ class VisionTransformer(nn.Module):
                 cams.append(cam.unsqueeze(0))
             rollout = compute_rollout_attention(cams, start_layer=start_layer)
             cam = rollout[:, 0, 1:]
-            return cam
-
-        elif method == "second_layer":
-            cam = self.blocks[1].attn.get_attn_cam()
-            cam = cam[0].reshape(-1, cam.shape[-1], cam.shape[-1])
-            grad = self.blocks[1].attn.get_attn_gradients()
-            grad = grad[0].reshape(-1, grad.shape[-1], grad.shape[-1])
-            cam = grad * cam
-            cam = cam.clamp(min=0).mean(dim=0)
-            cam = cam[0, 1:]
             return cam
 
         raise 'method not supported'
