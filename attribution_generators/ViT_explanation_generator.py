@@ -13,9 +13,9 @@ class ExplanationGenerator:
 
     def generate_LRP(
             self, input, index=None, method="transformer_attribution", is_ablation=False,
-            start_layer=0, device="cuda", use_1_3=False):
+            start_layer=0, device="cuda", use_1_3=False, use_eps_rule=False):
         output = self.model(input)
-        kwargs = {"alpha": 1, 'use_1_3': use_1_3}
+        kwargs = {"alpha": 1, 'use_1_3': use_1_3, "use_eps_rule": use_eps_rule}
         if index == None:
             index = np.argmax(output.cpu().data.numpy(), axis=-1)
 

@@ -64,7 +64,7 @@ def compute_saliency_and_save(images, path, expl_gen, device):
             else:
                 Res = expl_gen.generate_LRP(
                     data, start_layer=1, method=args.method, index=index, device=device,
-                    use_1_3=args.use_1_3)
+                    use_1_3=args.use_1_3, use_eps_rule=args.use_eps)
 
             Res = (Res - Res.min()) / (Res.max() - Res.min())
 
@@ -86,8 +86,7 @@ def imagenet_dataloader(imagenet_validation_path: str, batch_size: int = 1, NCC=
             normalize,
         ])
 
-    imagenet_ds = ImageNet(imagenet_validation_path, split='val',
-                           download=False, transform=transform)
+    imagenet_ds = ImageNet(imagenet_validation_path, split='val', transform=transform)
     sample_loader = torch.utils.data.DataLoader(
         imagenet_ds,
         batch_size=batch_size,
@@ -141,6 +140,12 @@ if __name__ == "__main__":
                         help='')
     parser.add_argument('--NCC',
                         # required=True,
+                        default=False,
+                        action='store_true',
+                        help='')
+
+    parser.add_argument('--use-eps',
+                        # required=True,
                         default=True,
                         action='store_true',
                         help='')
@@ -150,6 +155,8 @@ if __name__ == "__main__":
 
     mthd = args.method + "_13" if args.use_1_3 else args.method
     mthd = args.method + "_NCC" if args.NCC else args.method
+    mthd = args.method + "_use_eps" if args.use_eps else args.method
+
     args.save_path = os.path.join(args.work_path, "results", args.vit_model, mthd)
     os.makedirs(args.save_path, exist_ok=True)
 

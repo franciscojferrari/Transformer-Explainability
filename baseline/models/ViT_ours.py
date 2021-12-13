@@ -339,6 +339,8 @@ class VisionTransformer(nn.Module):
 
         # (Relevance · Attention) only in the last block
         use_1_3 = kwargs.pop("use_1_3", False)
+        use_eps_rule = kwargs.pop("use_eps_rule", False)
+
         if method == "last_layer":
             cam = self.head.relprop(cam, **kwargs)
             cam = self.pool.relprop(cam, device=device, **kwargs)
@@ -355,7 +357,7 @@ class VisionTransformer(nn.Module):
         cam = self.head.relprop(cam, **kwargs)
         cam = self.pool.relprop(cam, device=device, **kwargs)
         for blk in reversed(self.blocks):
-            cam = blk.relprop(cam, use_1_3=use_1_3, **kwargs)
+            cam = blk.relprop(cam, use_1_3=use_1_3, use_eps_rule=use_eps_rule, **kwargs)
 
         # rollout over relevance cams
         if method == "rollout":

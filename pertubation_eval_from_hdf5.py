@@ -212,6 +212,12 @@ if __name__ == "__main__":
                         action='store_true',
                         help='')
 
+    parser.add_argument('--use-eps',
+                        # required=True,
+                        default=True,
+                        action='store_true',
+                        help='')
+
     args = parser.parse_args()
 
     os.makedirs(os.path.join(args.work_path, 'experiments'), exist_ok=True)
@@ -219,6 +225,7 @@ if __name__ == "__main__":
 
     exp_name = 'neg_per' if args.neg else 'pos_per'
     mthd = args.method + "_NCC" if args.NCC else args.method
+    mthd = args.method + "_use_eps" if args.use_eps else args.method
 
     args.runs_dir = os.path.join(
         args.work_path, 'experiments/perturbations/{}/{}/{}'.format(args.vit_model, mthd, exp_name))
