@@ -19,12 +19,19 @@ perturbation_steps = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
 #                            0.22202, 0.1329, 0.07042, 0.03296, 0.0132, 0.0044, 0]
 
 
-# vit_ours_NCC pos
-# perturbed_accuracy_mean = [0.76394, 0.42608, 0.25682, 0.14892,
-#                            0.0808,  0.04192, 0.02054, 0.01002, 0.00424, 0.00276, 0]
-# vit_ours pos orginal predictions
-# perturbed_accuracy_mean = [1, 0.44858, 0.26092, 0.14928,
-#                            0.07912, 0.04036, 0.0192,  0.00972, 0.00422, 0.00282, 0]
+# vit_ours NCC neg
+# perturbed_accuracy_mean =
+# vit_ours NCC neg orginal predictions
+perturbed_accuracy_mean = [1, 0.91374, 0.881, 0.84296,
+                           0.7943, 0.72446, 0.6294, 0.50392, 0.34044, 0.14204, 0]
+
+# vit_ours NCC pos
+perturbed_accuracy_mean = [0.76394, 0.42608, 0.25682, 0.14892,
+                           0.0808, 0.04192, 0.02054, 0.01002, 0.00424, 0.00276, 0]
+# vit_ours NCC pos orginal predictions
+perturbed_accuracy_mean = [1, 0.44858, 0.26092, 0.14928,
+                           0.07912, 0.04036, 0.0192, 0.00972, 0.00422, 0.00282, 0]
+
 
 # vit_ours 1/3 neg
 #perturbed_accuracy_mean = [0.81432, 0.8, 0.78074, 0.75592, 0.71802, 0.66016, 0.57564, 0.46252, 0.31462, 0.13328, 0]
@@ -94,8 +101,7 @@ perturbed_accuracy_mean = [0.81432, 0.6312,  0.47894, 0.34142,
 # Softmax - pos
 #perturbed_accuracy_mean = [0.81432, 0.63202, 0.4789, 0.34214, 0.22368, 0.13498, 0.07242, 0.03324, 0.01312, 0.00462, 0]
 # Softmax - pos, original prediction
-# perturbed_accuracy_mean = [1, 0.66004, 0.48768, 0.34362,
-#                            0.22278, 0.13228, 0.07114, 0.0322, 0.0127, 0.00452, 0]
+#perturbed_accuracy_mean = [1, 0.66004, 0.48768, 0.34362, 0.22278, 0.13228, 0.07114, 0.0322, 0.0127, 0.00452, 0]
 
 
 ###### ABLATION STUDY ######

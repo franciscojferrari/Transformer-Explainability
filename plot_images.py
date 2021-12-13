@@ -4,18 +4,19 @@ from tqdm import tqdm
 import numpy as np
 import glob
 from baseline.models.ViT_ours import vit_base_patch16_224 as our_vit_base_patch16_224
+from baseline.models.ViT_original import vit_base_patch16_224 as original_base_model
 import torchvision.transforms as transforms
 import matplotlib.pyplot as plt
 import torch
 import numpy as np
 import cv2
 from tqdm import tqdm
-from attribution_generators.ViT_explanation_generator import ExplanationGenerator
+from attribution_generators.ViT_explanation_generator import ExplanationGenerator, RISE
 import os
 from torchvision.datasets import ImageNet
 import re
 from cls2idx import CLS2IDX
-
+import pdb
 
 def imagenet_dataloader(imagenet_validation_path: str, batch_size: int = 1):\
 
@@ -34,7 +35,7 @@ def imagenet_dataloader(imagenet_validation_path: str, batch_size: int = 1):\
         imagenet_ds,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=4,
+        num_workers=0,
         pin_memory=True
     )
     return sample_loader
@@ -49,7 +50,7 @@ def show_cam_on_image(img, mask):
 
 
 def generate_visualization(
-        original_image, attribution_generator, class_index=None, device="cuda",
+        original_image, attribution_generator, rise, class_index=None, device="cuda",
         method="transformer_attribution"):
 
     if method == 'attn_gradcam':
@@ -58,6 +59,8 @@ def generate_visualization(
             index=class_index,
             device=device
         ).detach()
+    elif method == 'RISE':
+        transformer_attribution = rise(img.unsqueeze(0).to(device)).detach().unsqueeze(0).unsqueeze(0)
     else:
         transformer_attribution = attribution_generator.generate_LRP(
             original_image.unsqueeze(0).to(device),
@@ -83,12 +86,12 @@ def generate_visualization(
 
 if __name__ == "__main__":
     method_columns = {'Input': 'Input', 'attn_gradcam': "GradCAM", 'lrp': "LRP",
-                      'partial_lrp': "Partial LRP", 'rollout': "Rollout",
+                      'partial_lrp': "Partial LRP", 'rollout': "Rollout", 'RISE': 'RISE',
                       'transformer_attribution': "Ours"}
 
     fig, axs = plt.subplots(4, len(method_columns), figsize=(15, 10))
     dataloader = imagenet_dataloader("/home/tf-exp-o-data/imgnet_val/", 10)
-
+    #dataloader = imagenet_dataloader("../Transformer-Explainability/data/", 10)
     normalize = transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
 
     cuda = torch.cuda.is_available()
@@ -97,9 +100,13 @@ if __name__ == "__main__":
     model = our_vit_base_patch16_224().to(device)
     model.eval()
     attribution_generator = ExplanationGenerator(model)
+    model_org = original_base_model().to(device)
+    model_org.eval()    
+    rise = RISE(model_org, input_size=(224, 224), device=device, gpu_batch=10)
+    rise.generate_masks(N=4000, s=10, p1=0.5)
 
     # imgs, targets = next(iter(dataloader))
-    counter = 20
+    counter = 5
     for imgs, targets in tqdm(dataloader):
         idx = 0
         for _, (img, y) in enumerate(zip(imgs, targets)):
@@ -124,10 +131,9 @@ if __name__ == "__main__":
                     axs[idx][idc].imshow(img.permute(1, 2, 0).data.cpu().numpy())
                 else:
                     vis = generate_visualization(
-                        img, attribution_generator=attribution_generator, device=device,
+                        img, attribution_generator=attribution_generator, rise=rise, device=device,
                         method=method)
                     axs[idx][idc].imshow(vis)
-
                 # Turn off tick labels
                 axs[idx][idc].set_yticklabels([])
                 axs[idx][idc].set_xticklabels([])
