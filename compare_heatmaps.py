@@ -8,11 +8,10 @@ import torch
 import numpy as np
 import cv2
 import pdb
-from attribution_generators.ViT_explanation_generator import ExplanationGenerator
+from attribution_generators.ViT_explanation_generator import ExplanationGenerator, RISE
 import h5py
 import os
 import time
-from attribution_generators.rise import RISE
 from cls2idx import CLS2IDX
 
 
@@ -62,21 +61,35 @@ def gen_raw_attr(base_model, image, device, model_name=None):
     return raw_attr
 
 
-def get_heatmap(raw_attr, max_=None):
+def show_cam_on_image(img, mask):
+    heatmap = cv2.applyColorMap(np.uint8(255 * mask.cpu()), cv2.COLORMAP_JET)
+    heatmap = np.float32(heatmap) / 255
+    cam = heatmap + np.float32(img)
+    cam = cam / np.max(cam)
+    return cam
+
+
+def get_heatmap(img, raw_attr, max_=None):
+    '''
     raw_attr = raw_attr.reshape(1, 1, 14, 14)
     attr = torch.nn.functional.interpolate(
         raw_attr, scale_factor=16, mode='bilinear', align_corners=False)
     attr = attr.reshape(224, 224).data.cpu().numpy()
-
+    '''
+    attr = raw_attr
     if max_ is None:
         max_ = attr.max()
 
     attr = (attr - attr.min()) / (max_ - attr.min())
-    heatmap = cv2.applyColorMap(np.uint8(255 * attr), cv2.COLORMAP_JET)
-    heatmap = np.float32(heatmap) / 255
-    heatmap = np.uint8(255 * heatmap)
-    heatmap = cv2.cvtColor(np.array(heatmap), cv2.COLOR_RGB2BGR)
-    return heatmap
+
+    attr = attr[0].permute(1,2,0)
+    img = img.permute(1,2,0)
+    img = (img - img.min()) / (img.max() - img.min())
+
+    vis = show_cam_on_image(img, attr)
+    vis = np.uint8(255 * vis)
+    vis = cv2.cvtColor(np.array(vis), cv2.COLOR_RGB2BGR)
+    return vis
 
 
 def main():
@@ -91,15 +104,16 @@ def main():
     cuda = torch.cuda.is_available()
     device = torch.device("cuda" if cuda else "cpu")
 
-    image = Image.open('samples/catdog.png')
+    #image = Image.open('samples/catdog.png')
+    image = Image.open('samples/dogbird.png')
     dog_cat_image = transform(image)
 
 
     # this is to generate a heatmap with RISE
     model = original_base_model().to(device)
     model.eval()    
-    rise = RISE(model, input_size=(224, 224), device=device, gpu_batch=100)
-    rise.generate_masks(N=2000, s=8, p1=0.5)
+    rise = RISE(model, input_size=(224, 224), device=device, gpu_batch=1)
+    rise.generate_masks(N=2000, s=10, p1=0.5)
     #heatmap_rise = rise(dog_cat_image.unsqueeze(0).to(device), class_idx=243)
     heatmap_rise = rise(dog_cat_image.unsqueeze(0).to(device))
 
@@ -114,7 +128,7 @@ def main():
         print('\n*** The two attribution maps ARE NOT the same ***\n')
     '''
     #heatmap_paper = get_heatmap(raw_attr_paper)
-    heatmap_ours = get_heatmap(raw_attr_ours)
+    heatmap_ours = get_heatmap(dog_cat_image, raw_attr_ours)
     #max_attr = np.maximum(raw_attr_paper.max(), raw_attr_ours.max())
     #heatmap_diff = get_heatmap(np.abs(raw_attr_paper - raw_attr_ours), max_=max_attr)
     #heatmap_diff_augmented = get_heatmap(np.abs(raw_attr_paper - raw_attr_ours))
@@ -123,7 +137,7 @@ def main():
     axs[0].imshow(image)
     axs[0].axis('off')
     axs[0].title.set_text('Original image')
-    axs[1].imshow(heatmap_rise)
+    axs[1].imshow(heatmap_rise.cpu())
     axs[1].axis('off')
     axs[1].title.set_text('RISE heatmap')
 
@@ -141,6 +155,7 @@ def main():
     axs[4].axis('off')
     axs[4].title.set_text('Heatmap diff augmented %.6f' % max_attr)
     '''
+    plt.savefig('perturbation_results/rise.png')
     plt.show()
 
 
