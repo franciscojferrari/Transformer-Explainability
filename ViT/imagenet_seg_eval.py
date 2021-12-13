@@ -49,8 +49,10 @@ def eval_batch(image, labels, evaluator, index, device, expl_gen, results_dir, e
     if args.method == 'attn_gradcam':
         Res = expl_gen.generate_cam_attn(image.to(device), device=device)
     else:
-        Res = expl_gen.generate_LRP(image.to(device), start_layer=1,
-                                    method=args.method, device=device, use_1_3=args.use_1_3)
+        Res = expl_gen.generate_LRP(
+            image.to(device),
+            start_layer=1, method=args.method, device=device, use_1_3=args.use_1_3,
+            use_eps_rule=args.use_eps)
 
     # threshold between FG and BG is the mean
     Res = (Res - Res.min()) / (Res.max() - Res.min())
@@ -155,6 +157,7 @@ def imagenet_seg_dataloader(imagenet_seg_path: str, batch_size: int = 1, NCC=Fal
 def run_seg_eval(args):
     mthd = args.method + "_13" if args.use_1_3 else args.method
     mthd = args.method + "_NCC" if args.NCC else args.method
+    mthd = args.method + "_use_eps" if args.use_eps else args.method
 
     directory = os.path.join(args.work_path, 'run', mthd)
     runs = sorted(glob.glob(os.path.join(directory, 'experiment_*')))
@@ -272,12 +275,14 @@ if __name__ == "__main__":
                         help='ours or paper')
 
     parser.add_argument('--imagenet-seg-path', type=str,
-                        # required=True,
+                        required=True,
                         default="/home/tf-exp-o-data/gtsegs_ijcv.mat",
                         )
     parser.add_argument('--work-path', type=str,
+                        required=True,
                         default="/home/tf-exp-o-data/",
                         help='')
+
     parser.add_argument('--method', type=str,
                         default="transformer_attribution",
                         help='')
@@ -287,6 +292,12 @@ if __name__ == "__main__":
                         action='store_true',
                         help='')
     parser.add_argument('--use-1-3',
+                        default=True,
+                        action='store_true',
+                        help='')
+
+    parser.add_argument('--use-eps',
+                        # required=True,
                         default=False,
                         action='store_true',
                         help='')

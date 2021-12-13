@@ -10,7 +10,7 @@ from baseline.models.ViT_ours import vit_base_patch16_224 as our_vit_base_patch1
 import glob
 
 from dataset.expl_hdf5 import ImagenetResults
-import pdb
+
 
 def normalize(tensor,
               mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]):
@@ -26,8 +26,6 @@ def eval(model, imagenet_ds, sample_loader, device, args):
     num_correct_model = np.zeros((len(imagenet_ds,)))
     dissimilarity_model = np.zeros((len(imagenet_ds,)))
     model_index = 0
-
-    print(len(imagenet_ds))
 
     if args.scale == 'per':
         base_size = 224 * 224
@@ -81,8 +79,8 @@ def eval(model, imagenet_ds, sample_loader, device, args):
         # Save original shape
         org_shape = data.shape
 
-        #if args.neg:
-        #vis = -vis
+        if args.neg:
+            vis = -vis
 
         vis = vis.reshape(org_shape[0], -1)
 
@@ -99,14 +97,14 @@ def eval(model, imagenet_ds, sample_loader, device, args):
 
             out = model(_data)
 
-            #pred_probabilities = torch.softmax(out, dim=1)
-            #pred_prob = pred_probabilities.data.max(1, keepdim=True)[0].squeeze(1)
-            #diff = (pred_prob - pred_org_prob).data.cpu().numpy()
-            #prob_diff_pertub[i, perturb_index:perturb_index+len(diff)] = diff
+            pred_probabilities = torch.softmax(out, dim=1)
+            pred_prob = pred_probabilities.data.max(1, keepdim=True)[0].squeeze(1)
+            diff = (pred_prob - pred_org_prob).data.cpu().numpy()
+            prob_diff_pertub[i, perturb_index:perturb_index+len(diff)] = diff
 
-            #pred_logit = out.data.max(1, keepdim=True)[0].squeeze(1)
-            #diff = (pred_logit - pred_org_logit).data.cpu().numpy()
-            #logit_diff_pertub[i, perturb_index:perturb_index+len(diff)] = diff
+            pred_logit = out.data.max(1, keepdim=True)[0].squeeze(1)
+            diff = (pred_logit - pred_org_logit).data.cpu().numpy()
+            logit_diff_pertub[i, perturb_index:perturb_index+len(diff)] = diff
 
             target_class = out.data.max(1, keepdim=True)[1].squeeze(1)
             temp = (target == target_class).type(target.type()).data.cpu().numpy()
@@ -126,7 +124,6 @@ def eval(model, imagenet_ds, sample_loader, device, args):
         model_index += len(target)
         perturb_index += len(target)
 
-    '''
     np.save(os.path.join(args.experiment_dir, 'model_hits.npy'), num_correct_model)
     np.save(os.path.join(args.experiment_dir, 'model_dissimilarities.npy'), dissimilarity_model)
     np.save(os.path.join(args.experiment_dir, 'perturbations_hits.npy'),
@@ -140,19 +137,24 @@ def eval(model, imagenet_ds, sample_loader, device, args):
             logit_diff_pertub[:, :perturb_index])
     np.save(os.path.join(args.experiment_dir, 'perturbations_prob_diff.npy'),
             prob_diff_pertub[:, :perturb_index])
-    '''
+
     print("num_correct_model: ", np.mean(num_correct_model), np.std(num_correct_model))
     print("dissimilarity_model: ", np.mean(dissimilarity_model), np.std(dissimilarity_model))
     print("perturbation_steps: ", perturbation_steps)
-    print("num_correct_pertub: ", np.mean(num_correct_pertub, axis=1), np.sum(num_correct_pertub, axis=1))
-    print("num_correct_pertub_original_prediction: ", np.mean(num_correct_pertub_original_prediction, axis=1), np.sum(num_correct_pertub_original_prediction, axis=1))
+    print("num_correct_pertub: ", np.mean(num_correct_pertub, axis=1),
+          np.std(num_correct_pertub, axis=1))
+
+    print("num_correct_pertub_original_prediction: ", np.mean(
+        num_correct_pertub_original_prediction, axis=1),
+        np.std(num_correct_pertub_original_prediction, axis=1))
     # print(np.mean(dissimilarity_pertub, axis=1), np.std(dissimilarity_pertub, axis=1))
+
 
 def pertturbation_eval(args):
     torch.multiprocessing.set_start_method('spawn')
 
     cuda = torch.cuda.is_available()
-    device = torch.device("cuda" if cuda else "cpu")
+    device = torch.device("cuda:0" if cuda else "cpu")
 
     imagenet_ds = ImagenetResults(args.vis_method_dir)
 
@@ -166,7 +168,7 @@ def pertturbation_eval(args):
     sample_loader = torch.utils.data.DataLoader(
         imagenet_ds,
         batch_size=args.batch_size,
-        num_workers=1,
+        num_workers=4,
         shuffle=False)
 
     eval(model, imagenet_ds, sample_loader, device, args)
@@ -177,8 +179,9 @@ if __name__ == "__main__":
     parser.add_argument('--batch-size', type=int,
                         default=16,
                         help='')
-    parser.add_argument('--neg', type=bool,
-                        default=False,       
+    parser.add_argument('--neg',
+                        default=False,
+                        action='store_true',
                         help='')
     parser.add_argument('--scale', type=str,
                         default='per',
@@ -190,7 +193,7 @@ if __name__ == "__main__":
                         help='')
 
     parser.add_argument('--work-path', type=str,
-                        # required=True,
+                        required=True,
                         default="/home/tf-exp-o-data/",
                         help='')
 
@@ -199,14 +202,33 @@ if __name__ == "__main__":
                         default="ours",
                         help='ours or paper')
 
+    parser.add_argument('--method', type=str,
+                        # required=True,
+                        default="transformer_attribution",
+                        help='')
+    parser.add_argument('--NCC',
+                        # required=True,
+                        default=False,
+                        action='store_true',
+                        help='')
+
+    parser.add_argument('--use-eps',
+                        # required=True,
+                        default=False,
+                        action='store_true',
+                        help='')
+
     args = parser.parse_args()
 
-    PATH = os.path.dirname(os.path.abspath(__file__)) + '/'
-    os.makedirs(os.path.join(PATH, 'experiments'), exist_ok=True)
-    os.makedirs(os.path.join(PATH, 'experiments/perturbations'), exist_ok=True)
+    os.makedirs(os.path.join(args.work_path, 'experiments'), exist_ok=True)
+    os.makedirs(os.path.join(args.work_path, 'experiments/perturbations'), exist_ok=True)
 
     exp_name = 'neg_per' if args.neg else 'pos_per'
-    args.runs_dir = os.path.join(PATH, 'experiments/perturbations/{}/{}'.format(args.vit_model, exp_name))
+    mthd = args.method + "_NCC" if args.NCC else args.method
+    mthd = args.method + "_use_eps" if args.use_eps else args.method
+
+    args.runs_dir = os.path.join(
+        args.work_path, 'experiments/perturbations/{}/{}/{}'.format(args.vit_model, mthd, exp_name))
 
     if args.wrong:
         args.runs_dir += '_wrong'
@@ -216,5 +238,6 @@ if __name__ == "__main__":
     args.experiment_dir = os.path.join(args.runs_dir, 'experiment_{}'.format(str(experiment_id)))
     os.makedirs(args.experiment_dir, exist_ok=True)
 
-    args.vis_method_dir = os.path.join(PATH, "visualizations/my_results")
+    args.vis_method_dir = os.path.join(args.work_path, "results", args.vit_model, mthd)
+
     pertturbation_eval(args)

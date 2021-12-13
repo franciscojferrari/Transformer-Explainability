@@ -12,7 +12,7 @@ import h5py
 import os
 from torchvision.datasets import ImageNet
 from argparse import ArgumentParser
-import logger
+import ViT.logger as logger
 
 
 def compute_saliency_and_save(images, path, expl_gen, device):
@@ -122,7 +122,7 @@ if __name__ == "__main__":
                         default=1,
                         help='')
     parser.add_argument('--work-path', type=str,
-                        # required=True,
+                        required=True,
                         default="/home/tf-exp-o-data/",
                         help='')
     parser.add_argument('--vit-model', type=str,
@@ -130,7 +130,7 @@ if __name__ == "__main__":
                         default="ours",
                         help='ours or paper')
     parser.add_argument('--method', type=str,
-                        # required=True,
+                        required=True,
                         default="transformer_attribution",
                         help='')
     parser.add_argument('--use-1-3',
@@ -146,7 +146,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--use-eps',
                         # required=True,
-                        default=True,
+                        default=False,
                         action='store_true',
                         help='')
 

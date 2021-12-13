@@ -141,8 +141,6 @@ dmypy.json
 .idea/
 logs/*
 .DS_Store
-visualizations/transformer_attribution/top/not_ablation/results.hdf5
+visualizations/*
 BertForSequenceClassification/*
-visualizations/my_results/results_new.hdf5
-*.hdf5
-images/*
+*/images/*
