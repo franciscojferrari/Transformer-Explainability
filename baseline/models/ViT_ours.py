@@ -93,10 +93,10 @@ class Attention(nn.Module):
         self.matmul2 = MatMul2()
 
         self.qkv = Linear(dim, dim * 3, bias=qkv_bias)
-        self.attn_drop = nn.Dropout(attn_drop)  
+        self.attn_drop = nn.Dropout(attn_drop)
         self.proj = Linear(dim, dim)
-        self.proj_drop = nn.Dropout(proj_drop) 
-        self.softmax = nn.Softmax(dim=-1)  
+        self.proj_drop = nn.Dropout(proj_drop)
+        self.softmax = nn.Softmax(dim=-1)
 
         self.attn_cam = None
         self.attn = None
@@ -156,13 +156,15 @@ class Attention(nn.Module):
         return out
 
     def relprop(self, cam, **kwargs):
+        use_1_3 = kwargs.pop('use_1_3', False)
+
         cam = self.proj.relprop(cam, **kwargs)
         cam = rearrange(cam, 'b n (h d) -> b h n d', h=self.num_heads)
 
         # attn = A*V
         (cam1, cam_v) = self.matmul2.relprop(cam)
-        use_1_3 = kwargs.get('use_1_3', False)      # whether to normalize flows equally as 1/3
-        if use_1_3: 
+        # whether to normalize flows equally as 1/3
+        if use_1_3:
             cam1 = cam1 * 2/3
             cam_v /= 3
         else:
@@ -188,10 +190,10 @@ class Block(nn.Module):
 
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, drop=0., attn_drop=0.):
         super().__init__()
-        self.norm1 = nn.LayerNorm(dim, eps=1e-6)  
+        self.norm1 = nn.LayerNorm(dim, eps=1e-6)
         self.attn = Attention(
             dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop)
-        self.norm2 = nn.LayerNorm(dim, eps=1e-6) 
+        self.norm2 = nn.LayerNorm(dim, eps=1e-6)
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, drop=drop)
 
@@ -277,13 +279,13 @@ class VisionTransformer(nn.Module):
                 drop=drop_rate, attn_drop=attn_drop_rate)
             for i in range(depth)])
 
-        self.norm = nn.LayerNorm(embed_dim)  
+        self.norm = nn.LayerNorm(embed_dim)
         if mlp_head:
             self.head = Mlp(embed_dim, int(embed_dim * mlp_ratio), num_classes)
         else:
             self.head = Linear(embed_dim, num_classes)
 
-        trunc_normal_(self.pos_embed, std=.02)  
+        trunc_normal_(self.pos_embed, std=.02)
         trunc_normal_(self.cls_token, std=.02)
         self.apply(self._init_weights)
 

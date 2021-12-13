@@ -83,7 +83,7 @@ def generate_visualization(
 
 if __name__ == "__main__":
     method_columns = {'Input': 'Input', 'attn_gradcam': "GradCAM", 'lrp': "LRP",
-                      'partial_lrp': "partial LPR", 'rollout': "Rollout",
+                      'partial_lrp': "Partial LRP", 'rollout': "Rollout",
                       'transformer_attribution': "Ours"}
 
     fig, axs = plt.subplots(4, len(method_columns), figsize=(15, 10))

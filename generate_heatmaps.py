@@ -134,13 +134,15 @@ if __name__ == "__main__":
                         # required=True,
                         default="transformer_attribution",
                         help='')
-    parser.add_argument('--use-1-3', type=bool,
+    parser.add_argument('--use-1-3',
                         # required=True,
                         default=False,
+                        action='store_true',
                         help='')
-    parser.add_argument('--NCC', type=bool,
+    parser.add_argument('--NCC',
                         # required=True,
                         default=True,
+                        action='store_true',
                         help='')
 
     args = parser.parse_args()
