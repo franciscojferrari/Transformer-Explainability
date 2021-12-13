@@ -94,7 +94,7 @@ def main():
     image = Image.open('samples/catdog.png')
     dog_cat_image = transform(image)
 
-    '''
+
     # this is to generate a heatmap with RISE
     model = original_base_model().to(device)
     model.eval()    
@@ -103,16 +103,17 @@ def main():
     #heatmap_rise = rise(dog_cat_image.unsqueeze(0).to(device), class_idx=243)
     heatmap_rise = rise(dog_cat_image.unsqueeze(0).to(device))
 
-    '''
+
     #raw_attr_paper = gen_raw_attr(paper_base_model, dog_cat_image, device, model_name='Original paper implementation')
     raw_attr_ours = gen_raw_attr(our_base_model, dog_cat_image, device, model_name='Our implementation')
 
+    '''
     if torch.equal(raw_attr_paper, raw_attr_ours):
         print('\n*** The two attribution maps ARE the same ***\n')
     else:
         print('\n*** The two attribution maps ARE NOT the same ***\n')
-
-    heatmap_paper = get_heatmap(raw_attr_paper)
+    '''
+    #heatmap_paper = get_heatmap(raw_attr_paper)
     heatmap_ours = get_heatmap(raw_attr_ours)
     #max_attr = np.maximum(raw_attr_paper.max(), raw_attr_ours.max())
     #heatmap_diff = get_heatmap(np.abs(raw_attr_paper - raw_attr_ours), max_=max_attr)
@@ -122,12 +123,13 @@ def main():
     axs[0].imshow(image)
     axs[0].axis('off')
     axs[0].title.set_text('Original image')
-    # axs[1].imshow(heatmap_rise)
-    # axs[1].axis('off')
-
-    axs[1].imshow(heatmap_paper)
+    axs[1].imshow(heatmap_rise)
     axs[1].axis('off')
-    axs[1].title.set_text('Paper\'s heatmap')
+    axs[1].title.set_text('RISE heatmap')
+
+    #axs[1].imshow(heatmap_paper)
+    #axs[1].axis('off')
+    #axs[1].title.set_text('Paper\'s heatmap')
     axs[2].imshow(heatmap_ours)
     axs[2].axis('off')
     axs[2].title.set_text('Our heatmap')
