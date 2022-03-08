@@ -9,6 +9,6 @@ Please refere to the ViT or BERT folder to run the different experiements
 
 ----
 ### Results
-Example of saliency maps generated to explain the ViT's prediction. For further examples, refer to our [project report](https://github.com/franciscojferrari/Transformer-Explainability/blob/main/Project%20report.pdf).
+Example of saliency maps generated to explain the ViT's prediction. For further examples and quantitative results, refer to our [project report](https://github.com/franciscojferrari/Transformer-Explainability/blob/main/Project%20report.pdf).
 
 ![Screenshot](fig_results.png)
