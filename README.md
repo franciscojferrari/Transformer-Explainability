@@ -6,3 +6,9 @@ We find a closed form for relevance propagation for each layer type, which **red
 This project was part of [DD2412 - Deep Learning, Advanced](https://www.kth.se/student/kurser/kurs/DD2412?l=en) at KTH. 
 
 Please refere to the ViT or BERT folder to run the different experiements
+
+----
+### Results
+Example of saliency maps generated to explain the ViT's prediction. For further examples, refer to our [project report](https://github.com/franciscojferrari/Transformer-Explainability/blob/main/Project%20report.pdf).
+
+![Screenshot](fig_results.png)
